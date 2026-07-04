@@ -1,0 +1,146 @@
+---
+description: PC端管理系统UI设计强制约束。当执行UI设计时加载。源自企业设计稿实测值。包含：色彩Token、间距Token、字体、布局骨架、组件精确规格、反模式清单。
+alwaysApply: true
+enabled: true
+updatedAt: 2026-06-23T21:10:00.000Z
+provider:
+---
+
+# B端管理系统 UI 设计 — 强制约束（企业设计稿实测）
+
+## B端设计铁律
+
+1. **可预测性 > 创造性** — 相同操作永远在相同位置，用户靠肌肉记忆工作
+2. **密度与清晰并存** — 单屏 ≥ 15 行数据，行高 48px，F型扫描
+3. **渐进式披露** — 层级1始终可见 → 层级2 hover → 层级3点击进入
+4. **全状态覆盖** — loading / empty / error / hover / focus / disabled / active
+5. **操作可撤销** — 危险操作必须二次确认
+6. **零装饰** — 无装饰性渐变/发光/模糊背景。功能即美学
+
+## 页面骨架（精确值，源自企业设计稿）
+
+```
+整体宽度：1920px
+顶部导航：60px（品牌蓝渐变，白色文字/图标）
+左侧导航：208px（bg: #fff，border-right: 1px #EBEBEB）
+内容区：left: 208px，top: 60px
+页面标题栏：64px + border-bottom
+页面边距：padding: 20px
+卡片样式：border 1px #EBEBEB + radius 8px + box-shadow 0 1px 2px rgba(0,0,0,.05)
+```
+
+## 色彩系统（企业设计稿唯一来源，禁止硬编码）
+
+### 中性色
+
+| Token | 色值 | 用途 |
+|-------|------|------|
+| `--color-neutral-01` | `#FFFFFF` | 卡片/面板/输入框背景 |
+| `--color-neutral-02` | `#F5F5F5` | 页面底色、表格表头 |
+| `--color-neutral-03` | `#EBEBEB` | 边框、分割线 |
+| `--color-neutral-04` | `#E0E0E0` | 输入框/Select 边框 |
+| `--color-neutral-06` | `#B8B8B8` | placeholder、字数限制 |
+| `--color-neutral-07` | `#808080` | 辅助图标、次要操作 |
+| `--color-neutral-08` | `#525252` | 菜单未选中、label 文字 |
+| `--color-neutral-09` | `#2B2B2B` | 正文、表格内容 |
+| `--color-neutral-10` | `#131315` | 主标题、卡片标题 |
+
+### 品牌蓝（唯一强调色）
+
+| Token | 色值 | 用途 |
+|-------|------|------|
+| `--color-blue-01` | `#F5F8FF` | hover 底色 |
+| `--color-blue-02` | `#E5EEFF` | 菜单选中底色 |
+| `--color-blue-05` | `#70A0FF` | 头像/图标背景 |
+| `--color-blue-06` | `#4784FF` | 线框按钮边框色 |
+| `--color-blue-07` | `#1E67FA` | 品牌主色/主按钮/链接/选中 |
+| `--color-blue-10` | `#001761` | 深蓝大标题 |
+
+### 语义色
+
+| Token | 色值 | 用途 |
+|-------|------|------|
+| `--color-red-07` | `#E52E2E` | 错误、必填、危险 |
+| `--color-orange-07` | `#FA820A` | 警告 |
+| `--color-green-07` | `#15AD3D` | 成功 |
+
+**禁止**：渐变色（除顶部导航）、纯黑 `#000`、硬编码色值
+
+## 间距系统（4px基准）
+
+| Token | 值 | 用途 |
+|-------|-----|------|
+| `--space-4` | `4px` | 图标与文字间 |
+| `--space-8` | `8px` | 行内元素、按钮组间距 |
+| `--space-12` | `12px` | 列表项内边距 |
+| `--space-16` | `16px` | 内容区内边距（Figma 20px→映射此档）、卡片间距 |
+| `--space-24` | `24px` | 卡片内边距、模块间距 |
+| `--space-32` | `32px` | 大模块间距 |
+| `--space-48` | `48px` | 页面级间距 |
+
+## 圆角系统
+
+| Token | 值 | 用途 |
+|-------|-----|------|
+| `--radius-sm` | `2px` | **按钮、输入框、Select**（企业标准，不是4px） |
+| `--radius-md` | `4px` | 小卡片、标签 |
+| `--radius-lg` | `8px` | 面板、卡片 |
+| `--radius-xl` | `12px` | 大卡片、弹窗 |
+| `--radius-full` | `9999px` | 圆形头像/图标 |
+
+## 字体层级（全局 PingFang SC）
+
+| 层级 | Size | Weight | Color | 用途 |
+|------|------|--------|-------|------|
+| 页面标题 | `18px` | `600` | `neutral-10` | 内容区标题 |
+| 卡片标题 | `16px` | `600` | `neutral-10` | 卡片/分组标题 |
+| 正文/表格 | `14px` | `400` | `neutral-09` | 正文、表格内容 |
+| 辅助文字 | `14px` | `400` | `neutral-08` | label、菜单未选中 |
+| 占位符 | `14px` | `400` | `neutral-06` | placeholder、字数限制 |
+
+## 组件精确规格
+
+| 组件 | 高度 | 圆角 | 其他 |
+|------|------|------|------|
+| 按钮（primary/line） | **40px** | **2px** | padding: 0 16px |
+| 文字按钮 | 20px | — | 无背景无边框 |
+| 输入框/Select | **40px** | **2px** | outline: 1px neutral-04 |
+| 表格行 | **48px** | — | border-bottom: 1px neutral-03 |
+| 表格表头 | **48px** | — | bg: neutral-02 |
+| 导航菜单项 | 40px | — | padding: 0 20px |
+| 菜单选中项 | 40px | **2px** | 内缩8px + bg: blue-02 |
+| 页面标题栏 | 64px | — | border-bottom |
+| 底部操作栏 | 80px | — | 按钮右对齐 |
+| 左侧导航 | 208px宽 | — | border-right |
+| 卡片 | — | 8px | border 1px + shadow 0 1px 2px rgba(0,0,0,.05) |
+
+## 交互状态
+
+| 状态 | 规范 |
+|------|------|
+| hover | `bg: blue-01` + `cursor: pointer` + `transition: 200ms ease` |
+| 选中 | `bg: blue-02` + `color: blue-07` + `radius: 2px`（内缩8px） |
+| focus | `outline-color: blue-07` |
+| disabled | `opacity: .5` + `cursor: not-allowed` |
+| loading | Skeleton骨架屏（匹配真实布局） |
+| empty | 设计过的空态 + CTA引导 |
+| 删除确认 | Popconfirm，禁止 window.confirm |
+
+## 反模式（生成前必查）
+
+```
+□ 硬编码色值 → var(--color-xxx)
+□ 硬编码间距 → var(--space-xxx)
+□ 按钮/输入框圆角≠2px → --radius-sm
+□ 表格行高≠48px
+□ 表格全文居中 → 文字左/数字右/状态中/操作右
+□ 卡片无三件套 → border + radius + shadow 缺一不可
+□ 渐变背景（除顶部导航）
+□ 彩色Tag装饰 → 仅语义色
+□ emoji作图标 → antd icons
+□ 标题>18px → 内容区上限
+□ 缺少任一UI状态 → loading/empty/error/hover/focus/disabled 全覆盖
+□ Submit后校验 → on-blur校验
+□ !important / z-index>1000
+□ window.confirm → Popconfirm
+```

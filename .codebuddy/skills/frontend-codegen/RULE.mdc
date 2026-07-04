@@ -1,0 +1,71 @@
+---
+description: 前端代码生成核心铁律。当执行前端代码生成(frontend-codegen)、创建TSX/TS/SCSS文件、拆分组件时必须遵守。包含：环境检测、文件规模、组件命名、TS类型、import顺序、错误处理、安全约束、响应式布局、反模式。
+alwaysApply: true
+enabled: true
+updatedAt: 2026-07-03T11:21:00.000Z
+provider:
+---
+
+# 前端代码生成 — 核心铁律
+
+## 铁律 0 — 项目环境检测（最高优先级）
+
+生成代码前必须读取项目配置（JSX运行时/TS严格/路径别名/UI库/样式方案/lint规则）。严禁假设默认配置。
+
+## 铁律 1 — 文件规模与结构
+
+```
+单文件 ≤ 360 行 | 单函数 ≤ 25 行 | 缩进 ≤ 2 层
+组件名=PascalCase | 文件名=kebab-case | 一个文件一个导出组件
+Hook文件: use-xxx.ts / hook.ts | 子组件目录: components/
+```
+
+## 铁律 2 — TypeScript 类型
+
+```
+简单类型用 T[] (string[]) | 非简单类型用 Array<T> (Array<Record<string, unknown>>)
+禁止 any | 禁止 async 直接传 onClick ✓ ()=>{void fn()}
+try/catch 的 err 必须 instanceof Error 类型守卫
+void message.error(...) 消除 floating promise
+禁用空 catch 块 | fail-fast 原则
+```
+
+## 铁律 3 — Import 顺序
+
+```
+1. 第三方(字母序) → 2. @/别名 → 3. ./相对 → 4. .scss 最后
+```
+
+## 铁律 4 — SCSS 样式
+
+```
+禁止硬编码颜色/字体 → 用 CSS 变量 var(--color-xxx) / var(--font-family-xxx)
+属性顺序：定位→盒模型→排版→视觉→动效 | 类名 camelCase
+```
+
+## 铁律 5 — 前端安全
+
+```
+❌ dangerouslySetInnerHTML / innerHTML / eval()
+URL 参数用 URLSearchParams / encodeURIComponent
+JSON.parse 必须 try/catch + 默认值 | 数组操作前 Array.isArray()
+禁止 token 存 localStorage（必须 httpOnly cookie）
+```
+
+## 铁律 6 — 响应式
+
+```
+移动优先：Mobile<768px(flex-col) → Desktop(flex-row/grid)
+禁止 100vw(用100%) | 禁止 h-screen(用min-h-dvh)
+间距用 gap / CSS Variables | 弹窗 Mobile 全屏 Drawer
+```
+
+## 铁律 7 — 反模式
+
+```
+□ 紫色渐变+深色网格+三卡对称(AI标配) | □ 玻璃拟态全屏
+□ 三列等宽 Bootstrap 栅格 | □ 导航栏边缘贴顶
+□ :has() / @container / @layer / subgrid | □ !important(覆盖三方除外)
+□ 动画 width/height/top/left(用transform/opacity)
+□ 组件内嵌 fetch/数据转换 → 抽到 hook.ts / util.ts
+```

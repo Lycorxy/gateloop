@@ -1,0 +1,103 @@
+---
+description: 前端技术架构设计强制约束。当执行前端架构设计(frontend-design)时加载。包含：模块化设计、耦合分析、红线边界、性能策略、兼容性策略、交互兜底、技术选型、布局决策树、线框图规范。
+alwaysApply: true
+enabled: true
+updatedAt: 2026-07-03T11:19:00.000Z
+provider:
+---
+
+# 前端技术架构设计 — 核心铁律
+
+## 铁律 0 — 上下文注入（强制）
+
+设计前必须先完成 Phase 0 上下文注入（路由/Store/Helpers/设计Token/CSS变量）。未完成不得开始设计。
+
+## 铁律 1 — 布局决策树
+
+```
+走此树决定页面结构：
+  列表管理 → 标准列表页（搜索卡片+表格卡片）
+  树形+内容 → 左右分栏（左侧树240px+右侧flex:1）
+  详情/编辑 → 字段≤6 Modal / 7-15 Drawer / >15独立页
+  数据看板 → 统计卡片行+图表/列表区
+  表单页 → 居中卡片(max-width:800px)+底部操作栏
+```
+
+## 铁律 2 — 架构决策
+
+```
+数据流：跨页面→Zustand | 同模块局部→Context | 单组件→useState | ❌Redux Toolkit
+组件拆分：JSX>50行拆Props>5个拆
+路由归属：顶部Tab/侧边栏/详情页
+页面路径：src/views/{domain}/{feature-page}/
+```
+
+## 铁律 3 — 模块化设计
+
+```
+模块判定：满足≥3项（独立路由/业务含义/数据模型/≥2子组件/可复用/独立生命周期）
+目录结构：index.tsx + hook.ts + types.ts + constants.ts + utils.ts + components/
+接口原则：模块只通过 index.tsx export default 暴露 | ❌跨模块引用内部文件
+```
+
+## 铁律 4 — 耦合分析
+
+| 等级 | 评分 | 行动 |
+|------|------|------|
+| 松耦合 | 1-2 | 保持 |
+| 中耦合 | 3-4 | 标记 watch 点 |
+| 紧耦合 | 5-6 | 必须拆分或合并 |
+| 死耦合 | 7+ | 重构，设计无效 |
+
+## 铁律 5 — 红线 + 性能
+
+```
+红线：输出不可修改的文件清单（"禁止修改：{file_list}"）
+性能：懒加载/组件缓存/数据缓存/防抖节流/虚拟滚动/状态提升
+```
+
+## 铁律 6 — 兼容性
+
+```
+目标浏览器：.browserslistrc → 默认 Chrome 90+ / Safari 14+ / Edge 90+ / Firefox 88+
+CSS 禁止：:has() / @container / @layer / subgrid / lh/dvh
+断点：Mobile<768px(flex-col) / Tablet(768-1023) / Desktop≥1024(flex-row)
+禁止 100vw(用100%) | 禁止 h-screen(用min-h-dvh)
+```
+
+## 铁律 7 — 交互兜底
+
+```
+交互元素 7 态：Default/Hover/Focus/Active/Disabled/Loading/Error
+数据区 5 态：Loading/Skeleton / Empty+CTA / Error+重试 / NoResult / Data
+```
+
+## 铁律 8 — 技术选型
+
+```
+状态管理：useState → Context → Zustand → Zustand+persist → ReactQuery/SWR
+列表：<50 .map() / 50-500 memo+分页 / 500-2000 虚拟滚动 / >2000 虚拟滚动+后端分页
+表单：单字段原生 / 2-4 antdForm / 5-8 TForm / >8 分步+Zustand草稿 / 动态 Form.List
+路由：平级侧边栏 / 父子<Outlet> / Tab<Outlet context> / 模态同级路由
+```
+
+## 铁律 9 — 线框图
+
+```
+ASCII 线框：先走铁律1→标注精确尺寸→标注组件选型→标注交互要点
+强制输出：【线框图强制约束 - frontend-codegen 必须严格遵守】
+```
+
+## 铁律 10 — 文件隔离
+
+```
+可写：.specflow/context/current.json, task-queue.json
+禁写：所有代码文件（只输出设计方案，不生成代码）
+```
+
+## 反模式
+
+```
+□ 写入代码文件 | □ 跳线框 | □ 跳关卡 | □ 凭空假设技术栈
+□ 假设设计Token | □ 跳全状态矩阵 | □ 跳耦合报告 | □ 跳模块依赖声明
+```

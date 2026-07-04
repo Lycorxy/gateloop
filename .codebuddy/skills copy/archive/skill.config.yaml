@@ -1,0 +1,27 @@
+priority: 70
+auto-trigger: true
+trigger-keywords:
+  - 记录经验
+  - 归档经验
+  - 沉淀知识
+  - 总结经验
+  - 存档
+  - 记录一下
+  - 知识沉淀
+
+depends-on: []
+mutual-exclude: [dev, fix, resume]
+require-tools: [read_file, write_file, search_content, replace_in_file, mcp_call_tool]
+
+load-strategy: lazy
+unload-after-run: true
+max-duration: 120
+
+trigger-weight:
+  记录经验: 90
+  归档经验: 90
+  沉淀知识: 85
+  总结经验: 80
+  记录一下: 85
+  知识沉淀: 80
+  存档: 75

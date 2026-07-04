@@ -1,0 +1,79 @@
+{
+    "editor.formatOnPaste": true,
+    "editor.formatOnSave": true,
+    "eslint.enable": true,
+    "editor.codeActionsOnSave": {
+        "source.fixAll.eslint": "explicit",
+        "source.fixAll.stylelint": "explicit"
+    },
+    "eslint.validate": [
+        "javascript",
+        "javascriptreact",
+        "react",
+        "typescript",
+        "typescriptreact",
+        "html",
+        "markdown",
+        "json",
+        "jsonc",
+        "json5"
+    ],
+    "[scss]": {
+        "editor.defaultFormatter": "stylelint.vscode-stylelint"
+    },
+    "[css]": {
+        "editor.defaultFormatter": "stylelint.vscode-stylelint"
+    },
+    "stylelint.validate": [
+        "css",
+        "scss",
+        "sass",
+        "postcss"
+    ],
+    "css.validate": false,
+    "less.validate": false,
+    "scss.validate": false,
+    "eslint.options": {
+        "extensions": [
+            ".js",
+            ".jsx",
+            ".ts",
+            ".tsx",
+            "html",
+            "markdown",
+            "json",
+            "jsonc",
+            "json5"
+        ]
+    },
+    "files.eol": "\n",
+    "search.exclude": {
+        "**/.git": true,
+        "**/.pnpm": true,
+        "**/.vscode": true,
+        "**/dist/**": true,
+        "**/node_modules": true,
+        "**/pnpm-lock.yaml": true
+    },
+    "typescript.tsdk": "node_modules/typescript/lib",
+    "javascript.format.insertSpaceBeforeFunctionParenthesis": true,
+    "typescript.format.insertSpaceBeforeFunctionParenthesis": true,
+    "typescript.enablePromptUseWorkspaceTsdk": true,
+    "explorer.sortOrder": "default",
+    "explorer.compactFolders": false,
+    "json.schemaDownload.enable": true,
+    "workbench.tree.indent": 16,
+    "json.schemas": [
+        {
+            "fileMatch": [
+                "package.json"
+            ],
+            "url": "https://json.schemastore.org/package",
+            "schema": true
+        }
+    ],
+    "editor.quickSuggestions": {
+        "strings": "on"
+    },
+    "liveServer.settings.port": 5501
+}

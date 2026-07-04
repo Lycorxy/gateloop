@@ -1,0 +1,16 @@
+{
+    "hooks": {
+        "UserPromptSubmit": [
+            {
+                "matcher": "",
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": "node D:/lucky/ai-ultra/.codebuddy/hooks/aivn-record.cjs",
+                        "timeout": 10
+                    }
+                ]
+            }
+        ]
+    }
+}

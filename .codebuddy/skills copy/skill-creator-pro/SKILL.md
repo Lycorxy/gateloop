@@ -1,0 +1,370 @@
+---
+name: skill-creator-pro
+description: >
+  创建高质量 Agent Skill，保证触发准确性和稳定性。
+  当用户想要创建、优化、验证或调试任何 skill 时调用。
+  通过 7 阶段门控工作流 + 4 层验证，确保 skill 具有最优的触发准确性、
+  确定性逻辑和最小上下文占用。
+  支持单 skill 创建和多 skill 编排。
+  不要用于通用编码任务、git 操作或非 skill 文件编辑。
+---
+
+# Skill Creator Pro v2
+
+## 🛑 入口守卫
+
+```
+本 Skill 加载后必须按 Phase 1→...→7 门控工作流执行全部阶段。
+每阶段通过后才可进入下一阶段，禁止跳阶段。
+```
+
+创建专业级 Agent Skill，具备最优可发现性、确定性执行和最小上下文占用。
+
+## 快速决策树
+
+```
+用户需要 skill 相关操作？
+├── 创建新 skill？      → Phase 1→7 完整工作流
+├── 优化现有 skill？    → Phase 5(验证) → 6(迭代) → 7(交付)
+├── 多 skill 系统？     → 添加 config.yaml + 编排器章节
+└─── 调试触发问题？     → Layer 1 测试 → 修复 description
+```
+
+## 7 阶段门控工作流
+
+```
+CAPTURE ──→ RESEARCH ──→ ARCHITECT ──→ DRAFT ──→ VALIDATE ──→ ITERATE ──→ DELIVER
+```
+
+**规则：** 在任何阶段的退出条件满足之前，不得进入下一阶段。
+
+---
+
+### Phase 1：捕获意图
+
+首先从对话中提取信息，然后追问缺口：
+
+| # | 问题 | 是否必须？ |
+|---|------|-----------|
+| 1 | **做什么**具体能力？（不是领域名称） | 必须 |
+| 2 | **何时**触发？（确切短语、上下文） | 必须 |
+| 3 | **何时不**触发？（相似但错误的上下文） | 必须 |
+| 4 | 预期输出格式？ | 必须 |
+| 5 | 2-3 个真实示例提示词 | 必须 |
+| 6 | 单 skill 还是多 skill 编排？ | 多 skill 时必须 |
+
+**退出条件：** 用户确认触发词 + 反触发词 + 2 个示例提示词。
+
+### Phase 2：调研
+
+1. 检查工作区中已有 skill 是否有重叠
+2. 识别边界情况：畸形输入、缺失依赖、环境差异
+3. 决定资源结构：scripts / references / assets
+4. 将假设告知用户并确认
+5. 确定 **自由度等级** — 参见 [references/freedom-levels.md](references/freedom-levels.md)
+
+**退出条件：** 边界情况已列出，自由度已决定，结构已规划。
+
+### Phase 3：架构设计
+
+**标准结构：**
+```
+skill-name/                   # kebab-case，与 name 字段一致
+├── SKILL.md                  # 必须：frontmatter + 正文（<500 行）
+├── skill.config.yaml         # 必须：priority、deps、triggers（见模板）
+├── scripts/                  # 确定性 CLI 工具（不是库）
+├── references/               # 按需加载的文档（仅一层深度）
+├── examples/                 # 正向 + 负向触发示例
+└── assets/                   # 输出模板、schema
+```
+
+**结构规则：**
+- 正文 > 500 行 → 拆分到 references/
+- 易出错操作 → 打包为 scripts
+- 固定输出格式 → 创建 asset 模板
+- 多个领域 → 按领域组织 references
+- 多 skill → 添加 skill.config.yaml
+- references > 100 行 → 在顶部添加目录
+
+**退出条件：** 结构设计完成，内容分配决定完毕。
+
+### Phase 4：起草
+
+#### 4.1 Frontmatter（唯一预加载到全局注册表的内容）
+
+```yaml
+---
+name: skill-name              # ≤64 字符，仅小写/连字符
+description: >                # ≤1024 字符，第三人称，无 XML 标签
+  [功能描述]。当 [触发关键词 + 上下文] 时使用。
+  不要用于 [反触发场景]。
+version: 1.0.0
+dependencies: []              # 必须先加载的 skill
+conflict-with: []             # 互斥的 skill
+allowed-tools: [read_file]    # 显式工具白名单
+max-token: 1500               # 上下文预算上限
+---
+```
+
+**description 结构（3 个必需部分）：**
+
+| 部分 | 规则 | 示例 |
+|------|------|------|
+| **做什么** | 第三人称、现在时 | "执行代码评审，检查 bug..." |
+| **何时用** | 触发关键词 + 确切短语 | "当用户说 代码评审、review code..." |
+| **何时不用** | 相似但错误的反触发词 | "不要用于编写新代码..." |
+
+**错误示例：** `"代码评审 skill。"`（太模糊，无触发词）
+**正确示例：** `"执行代码评审，检查 bug、命名、安全问题。当用户请求 代码评审、review code、检查 bug、优化现有代码时使用。不要用于编写新功能、回答语法问题或审查非代码文档。"`
+
+#### 4.2 正文结构
+
+```markdown
+# Skill 标题
+
+## 概述
+[1-2 句话：做什么 + 为什么]
+
+## 何时使用 / 何时不使用
+[触发条件 + 反触发词]
+
+## 工作流
+1. [祈使句步骤 — 具体操作]
+2. [带决策树的步骤（如有分支）]
+3. [带验证检查点的步骤]
+
+## 输出格式
+[严格型："始终使用此确切格式"]
+[灵活型："合理默认，根据上下文调整"]
+
+## 错误处理
+[每个步骤的显式错误路径]
+
+## 验证清单
+- [ ] 检查项
+- [ ] 检查项
+
+## 参考资料
+[链接到参考文件 — 仅一层深度]
+```
+
+#### 4.3 自由度匹配（关键）
+
+将指令具体程度与任务脆弱性匹配：
+
+| 等级 | 使用场景 | 指令风格 | 示例 |
+|-------|---------|---------|------|
+| **高** | 多条有效路径，上下文相关决策 | 文本指南、启发式规则 | 代码评审流程 |
+| **中** | 存在首选模式，有一定灵活性 | 伪代码、参数化模板 | 报告生成 |
+| **低** | 脆弱操作，顺序至关重要 | 确切脚本，最少参数 | 数据库迁移 |
+
+完整指南：[references/freedom-levels.md](references/freedom-levels.md)
+
+#### 4.4 写作规则
+
+- **祈使句**："读取文件..." 而非 "你应该读取..."
+- **编号步骤**：严格排序，无歧义
+- **一个概念一个术语**：选一个，全篇统一（不要混用 "endpoint"/"URL"/"route"）
+- **无魔法数字**：每个值都有文档化理由
+- **仅使用正斜杠路径**：`references/guide.md` 绝不 `references\guide.md`
+- **无时间信息**：不要写 "2025 年 8 月之后"；改用 "遗留" 章节
+- **假设 Claude 很聪明**：只添加 Claude 真正缺乏的上下文
+
+**退出条件：** SKILL.md 起草完成（<500 行），所有资源已创建。
+
+---
+
+### Phase 5：验证（4 层）
+
+**Layer 1 — 可发现性：**
+- 生成 3 个必须触发的提示词（100% 置信度）
+- 生成 3 个必须不触发的提示词（相似但错误）
+- 如有失败 → 立即修复 frontmatter 中的 description
+
+**Layer 2 — 逻辑：**
+- 针对真实测试提示词模拟逐步执行
+- 标记 agent 必须"猜测"或解释歧义的任何步骤
+- 验证每个错误路径都有显式处理
+
+**Layer 3 — 边界情况：**
+- 畸形输入？缺失依赖？部分匹配？
+- 操作系统差异（Windows/Linux/macOS）？编码问题？
+
+**Layer 4 — 架构：**
+- SKILL.md ≤ 500 行？
+- 所有大段内容已卸载到 references/？
+- references 是扁平的（无嵌套目录）？
+- 所有路径使用 `/`？
+- 无 README/CHANGELOG 人工文档？
+
+详细测试模板：[references/validation-framework.md](references/validation-framework.md)
+
+**退出条件：** 全部 4 层通过。记录任何豁免项及理由。
+
+### Phase 6：迭代
+
+优先级顺序：**关键**（逻辑缺口）→ **必需**（歧义步骤）→ **可选**（风格）
+
+修复后，仅重新运行受影响的验证层。
+
+**Claude 辅助迭代模式**（最有效的方法）：
+
+1. **Claude-A**（本次会话）：起草/完善 skill
+2. **Claude-B**（全新会话，已加载 skill）：在真实任务上测试
+3. **观察 Claude-B**：它漏掉了什么？在哪里卡住了？意外路径？
+4. **返回 Claude-A** 并附上具体观察："做 X 时，它忘记了 Y"
+5. **基于行为证据迭代，而非假设**
+
+完整迭代指南：[references/evaluation-driven-dev.md](references/evaluation-driven-dev.md)
+
+**退出条件：** 所有关键 + 必需问题已解决，重新验证通过。
+
+### Phase 7：交付
+
+1. 创建 `.codebuddy/skills/<name>/` 目录
+2. 写入所有文件，结构正确
+3. 最终清单：
+   - [ ] 目录名与 `name` 字段一致（kebab-case）
+   - [ ] description 包含触发词 + 反触发词 + 关键词
+   - [ ] 正文 ≤ 500 行
+   - [ ] 无非 agent 面向的 README/CHANGELOG/docs
+   - [ ] 所有路径使用正斜杠 `/`
+   - [ ] skill.config.yaml 存在（即使是单 skill）
+   - [ ] examples 包含正向 AND 负向触发示例
+4. 向用户展示结构 + 快速上手指南
+
+---
+
+## 多 Skill 协作与编排
+
+### skill.config.yaml（多 skill 系统中每个 skill 都必须）
+
+```yaml
+# ── 触发与优先级 ──
+priority: 80                  # 越高 = 多个匹配时优先
+auto-trigger: true            # 关键词匹配时自动激活
+trigger-keywords:
+  - 代码评审
+  - review code
+  - 查bug
+
+# ── 依赖关系 ──
+depends-on: []                # 在此 skill 之前加载这些
+mutual-exclude: [quick-check] # 永不共存的 skill
+require-tools: [read_file, write_file]
+
+# ── 生命周期 ──
+load-strategy: lazy           # lazy=触发时加载 | eager=预加载
+unload-after-run: true        # 执行后释放上下文
+max-duration: 120             # 超时秒数
+
+# ── 触发权重（用于冲突解决）──
+trigger-weight:
+  代码评审: 90
+  review代码: 85
+  查bug: 75                  # 越低 = 需要更多上下文
+```
+
+参见完整模板：`examples/skill.config.template.yaml`
+
+### 协作规则
+
+1. **优先级解决冲突** — 最高优先级在 2+ 个 skill 匹配时激活
+2. **depends-on 确保顺序** — 调度器先加载依赖
+3. **mutual-exclude 防止冲突** — 互斥 skill 永不共存
+4. **lazy load 节省 token** — 仅在实际触发时加载 SKILL.md
+5. **unload-after-run 回收** — 任务完成后释放上下文窗口
+
+### 扩展策略
+
+| Skill 数量 | 方法 |
+|-------------|------|
+| 1-5 | 直接加载，无需编排器 |
+| 5-20 | 添加带关键词匹配的编排器 |
+| 20-50 | 添加 `trigger-weight` 评分 + 阈值过滤 |
+| 50+ | 向量相似度预过滤 → Top-K 召回 |
+
+### 编排器模式（10+ 个 skill）
+
+创建一个轻量级调度 skill，首先运行：
+
+```yaml
+name: skill-orchestrator
+description: >
+  中央 skill 调度器。启动时扫描所有 skill 元数据，
+  通过关键词/相似度匹配用户意图，加载最优 skill。
+  每次请求时使用，确保正确的 skill 选择。
+priority: 0                   # 最低 — 首先运行以选择目标
+load-strategy: eager          # 始终加载，最小占用（约 100 行）
+```
+
+编排器职责：
+- 启动时扫描所有 skill 元数据
+- 构建 keyword→skill 索引
+- 每次用户请求：按 priority + weight 排序候选
+- 处理 depends-on / mutual-exclude 解决
+- 强制执行总 token 预算（防止溢出）
+
+---
+
+## 高级模式
+
+针对需要专门行为的复杂 skill：
+
+| 模式 | 使用场景 | 参见 |
+|------|---------|------|
+| **反馈循环** | 有关键质量验证器的任务 | [references/advanced-patterns.md](references/advanced-patterns.md) |
+| **条件详情** | 基础内容 + 高级主题链接 | [references/advanced-patterns.md](references/advanced-patterns.md) |
+| **视觉分析** | 输入可渲染为图像 | [references/advanced-patterns.md](references/advanced-patterns.md) |
+| **可验证中间输出** | 复杂批量操作、高风险变更 | [references/advanced-patterns.md](references/advanced-patterns.md) |
+| **MCP 工具集成** | Skill 使用外部 MCP 服务器工具 | [references/advanced-patterns.md](references/advanced-patterns.md) |
+
+---
+
+## 反模式快速参考
+
+| 反模式 | 修复 |
+|--------|------|
+| 模糊 description（"帮助写代码"） | 3 部分：做什么 + 何时触发 + 何时不触发 |
+| 散文式指令（"你可以..."） | 编号祈使句步骤 |
+| 正文 > 500 行 | 卸载到 references/ |
+| 嵌套 reference 目录（`ref/a/b.md`） | 扁平结构，仅一层深度 |
+| scripts/ 中有库代码 | scripts = 小型 CLI 工具 only |
+| 存在 README/CHANGELOG | 删除所有人工面向文档 |
+| 缺失错误处理 | 每个步骤有显式错误路径 + 恢复操作 |
+| Windows 反斜杠路径 | 仅正斜杠 `/` |
+| 无验证/清单 | 在工作流末尾添加清单 |
+| 过度工程化结构 | 满足需求的最简方案 |
+| 缺失 config.yaml | 每个 skill 都获得 config 以备未来扩展 |
+| 脚本中的魔法数字 | 记录每个常量的理由 |
+| 时间信息（"v2 之后"） | 改用遗留/弃用章节 |
+| 术语混用 | 选一个术语，全篇统一 |
+| 假设包已安装 | 显式列出依赖并附安装命令 |
+
+---
+
+## 质量评分卡
+
+| 维度 | 优秀 (5/5) |
+|------|------------|
+| **可发现性** | 触发词 + 反触发词 + 确切关键词 + 正向/负向示例 |
+| **确定性** | 所有步骤编号 + 决策树 + 零歧义词汇 |
+| **上下文效率** | 元数据精简，正文 <500 行，资源懒加载 |
+| **错误处理** | 每个步骤有显式错误路径 + 恢复操作 |
+| **可验证性** | 清单 + 每阶段退出条件 + 评估模板 |
+| **协作就绪** | config.yaml 完整，deps/mutual-exclude 已定义 |
+| **自由度匹配** | 指令与任务脆弱性等级匹配（高/中/低） |
+
+---
+
+## 文件参考
+
+| 文件 | 内容 |
+|------|------|
+| [references/freedom-levels.md](references/freedom-levels.md) | 自由度匹配指南，含决策矩阵 |
+| [references/writing-patterns.md](references/writing-patterns.md) | 正文模板、输出格式、决策树 |
+| [references/validation-framework.md](references/validation-framework.md) | 完整 4 层验证测试提示词和清单 |
+| [references/evaluation-driven-dev.md](references/evaluation-driven-dev.md) | 评估驱动开发和 Claude-A/B 迭代 |
+| [references/advanced-patterns.md](references/advanced-patterns.md) | 反馈循环、视觉分析、MCP 工具、条件详情 |
+| [examples/skill.config.template.yaml](examples/skill.config.template.yaml) | 可直接复制的 config 模板 |
+| [examples/complete-skill-example.md](examples/complete-skill-example.md) | 完整可用 skill 示例（code-review） |

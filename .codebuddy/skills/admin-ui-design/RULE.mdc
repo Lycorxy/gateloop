@@ -1,0 +1,76 @@
+---
+description: PC端管理系统UI设计强制约束。当执行UI设计时通过 read_file 注入上下文。包含：色彩Token、间距Token、字体层级、布局骨架、组件精确规格、反模式清单。
+alwaysApply: false
+enabled: true
+updatedAt: 2026-07-03T11:58:00.000Z
+provider:
+---
+
+# B端管理系统 UI 设计 — 核心铁律
+
+## B端设计铁律
+
+1. 可预测性 > 创造性 | 2. 密度与清晰并存（单屏≥15行，行高48px）
+3. 渐进式披露 | 4. 全状态覆盖 | 5. 操作可撤销 | 6. 零装饰
+
+## 页面骨架
+
+```
+顶部导航：60px | 左侧导航：208px | 内容区 left:208px top:60px
+页面标题栏：64px+border-bottom | 边距：padding:20px
+卡片：border 1px #EBEBEB + radius 8px + shadow 0 1px 2px
+```
+
+## 色彩系统
+
+```
+中性色：01(#FFF)→02(#F5F5)→03(#EBEB)→04(#E0E0)→06(#B8B8)→07(#8080)→08(#5252)→09(#2B2B)→10(#131315)
+品牌蓝：01(#F5F8FF)→02(#E5EEFF)→05(#70A0FF)→06(#4784FF)→07(#1E67FA)→10(#001761)
+语义色：红07(#E52E2E) / 橙07(#FA820A) / 绿07(#15AD3D)
+禁止：渐变色(除顶部导航)、纯黑、硬编码
+```
+
+## 间距（4px基准）
+
+```
+--space-4(4) / -8(8) / -12(12) / -16(16) / -24(24) / -32(32) / -48(48)
+```
+
+## 圆角
+
+```
+--radius-sm(2px:按钮/输入框) / -md(4px:小卡片) / -lg(8px:面板/卡片) / -xl(12px:大卡片) / -full(9999px:头像)
+```
+
+## 字体层级
+
+```
+L1 页面标题：18px/600/neutral-10 | L2 卡片标题：16px/600/neutral-10
+L3 正文/表格：14px/400/neutral-09 | L4 辅助：14px/400/neutral-08
+L5 占位符：14px/400/neutral-06
+```
+
+## 组件规格
+
+```
+按钮/输入框/菜单项：40px/2px | 表格行/表头：48px
+页面标题栏：64px | 底部操作栏：80px | 左侧导航：208px宽
+```
+
+## 交互状态
+
+```
+hover:bg:blue-01+cursor:pointer | 选中:bg:blue-02+color:blue-07+radius:2px
+focus:outline:blue-07 | disabled:opacity:.5+cursor:not-allowed
+loading:Skeleton骨架屏 | empty:空态+CTA
+删除确认:Popconfirm(禁window.confirm)
+```
+
+## 反模式速查
+
+```
+□ 硬编码色值/间距→var() | □ 按钮圆角≠2px | □ 表格行≠48px
+□ 表格全文居中 | □ 卡片缺三件套(边框+圆角+阴影)
+□ 渐变背景(除顶部导航) | □ emoji作图标→antd icons
+□ 标题>18px | □ 缺UI状态(loading/empty/error/hover/focus/disabled)
+□ !important / z-index>1000 | □ window.confirm→Popconfirm

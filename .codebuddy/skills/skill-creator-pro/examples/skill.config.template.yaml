@@ -1,0 +1,28 @@
+# Skill 配置模板（v2）
+# 将此文件复制到 skill-name/skill.config.yaml（每个 skill 一份）
+
+# ── 触发与优先级 ──
+priority: 80
+auto-trigger: true
+trigger-keywords:
+    - keyword1
+    - keyword2
+    - keyword3
+
+# ── 依赖关系 ──
+# 🔒 depends-on 必须包含 specflow-rules-engine（规则注入引擎）
+depends-on:
+    - specflow-rules-engine
+mutual-exclude: []
+require-tools: [read_file]
+
+# ── 生命周期 ──
+load-strategy: lazy
+unload-after-run: true
+max-duration: 120
+
+# ── 触发权重 ──
+trigger-weight:
+    keyword1: 90
+    keyword2: 80
+    keyword3: 50

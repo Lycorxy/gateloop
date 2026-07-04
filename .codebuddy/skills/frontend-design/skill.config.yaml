@@ -1,0 +1,46 @@
+# Skill Configuration for frontend-design
+# ── 触发与优先级 ──
+priority: 80
+auto-trigger: true
+trigger-keywords:
+    - 前端设计
+    - 前端架构设计
+    - 设计前端方案
+    - 组件拆分设计
+    - 路由设计
+    - 数据流方案
+    - 前端模块设计
+    - 架构方案设计
+    - 技术方案设计
+    - 前端技术选型
+    - 前端性能策略
+    - 模块边界设计
+    - 代码架构设计
+    - 红线约束
+    - 耦合分析
+    - 模块化设计
+
+# ── 依赖关系 ──
+depends-on: [specflow-rules-engine]
+mutual-exclude: [admin-ui-design, frontend-codegen]
+require-tools:
+    [read_file, grep_search, codebase_search, search_files, list_dir, use_skill, use_mcp_tool]
+
+# ── 生命周期 ──
+load-strategy: lazy
+unload-after-run: true
+max-duration: 360
+
+# ── 触发权重 ──
+trigger-weight:
+    前端架构设计: 95
+    前端设计: 90
+    架构设计: 90
+    组件拆分设计: 85
+    前端模块设计: 85
+    模块化设计: 85
+    路由设计: 80
+    数据流方案: 80
+    技术方案设计: 75
+    耦合分析: 75
+    红线约束: 70

@@ -1,0 +1,47 @@
+---
+description: 前后端联调强制约束。仅联调任务时通过 read_file 注入上下文。包含：数据层隔离、transform规范、增量验证、范围边界、反模式清单。
+alwaysApply: false
+enabled: true
+updatedAt: 2026-07-03T11:23:00.000Z
+provider:
+---
+
+# 前后端联调 — 核心铁律
+
+## 铁律 1 — 只改数据层
+
+```
+View/Logic 层 ─── 禁止修改
+Data 层       ─── 唯一改动区域：transform 函数
+API 调用层    ─── 新增 fetch 函数
+✓ 改数据获取方式（删 mock + fetch + transform）
+✗ 改 JSX / useState / 业务逻辑
+```
+
+## 铁律 2 — transform 规范
+
+```
+输入=后端类型 | 输出=组件类型 | 函数 ≤ 50行 | 仅字段映射不做业务逻辑
+✗ 含 .filter() / if/else 业务判断 | ✓ 纯字段映射+值转换
+```
+
+## 铁律 3 — 增量验证
+
+```
+一次一个接口：transform → 替换 → 验证(编译+页面) → 提交
+禁止一次改完所有接口再验证
+```
+
+## 铁律 4 — 范围边界
+
+```
+>3 模块 | >5 文件 | 需改组件内部 | 字段差异 > 10 个 → ⛔ 立即暂停
+```
+
+## 铁律 5 — Always/Ask/Never
+
+```
+Always: 每个接口加 transform + 独立验证编译
+Ask: 文件>5 或 模块>3 或 需改组件内部
+Never: 组件直接用后端原始数据 / 顺手改无关文件 / 跳过验证
+```

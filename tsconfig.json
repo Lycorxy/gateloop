@@ -1,0 +1,27 @@
+{
+    "compilerOptions": {
+        "target": "ESNext",
+        "module": "ESNext",
+        "allowSyntheticDefaultImports": true,
+        "experimentalDecorators": true,
+        "moduleResolution": "Bundler",
+        "noImplicitAny": true,
+        "noUnusedLocals": true,
+        "noUnusedParameters": true,
+        "removeComments": false,
+        "resolveJsonModule": true,
+        "skipLibCheck": true,
+        "strict": true,
+        "strictNullChecks": true,
+        "baseUrl": ".",
+        "paths": {
+            "@/*": ["src/*"]
+        },
+        "types": ["node", "fs-extra", "jest"],
+        "esModuleInterop": true,
+        "declaration": true,
+        "outDir": "./dist/types"
+    },
+    "include": ["./src", "./rollup.config.ts"],
+    "exclude": ["node_modules", "src-back", "src/adapters"]
+}

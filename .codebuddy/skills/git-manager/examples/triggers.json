@@ -1,0 +1,24 @@
+{
+  "should_trigger": [
+    "帮我暂存所有文件然后提交",
+    "git add src/ 然后 commit",
+    "查看当前工作区状态",
+    "帮我回退到上一个快照",
+    "对比一下 main 和 develop 分支的差异",
+    "看看 src/utils.ts 的提交历史",
+    "创建一个新分支 feature-login",
+    "切换到 develop 分支",
+    "stash 一下当前修改",
+    "修复一下项目的换行符",
+    "帮我配置 GitHub 的 SSH",
+    "撤销刚才的暂存操作"
+  ],
+  "should_not_trigger": [
+    "保存一下这轮对话的代码版本",
+    "帮我看看这轮对话改了什么文件",
+    "检查一下代码有没有 lint 错误",
+    "运行 ESLint 检查项目",
+    "帮我写一个 React 组件",
+    "git rebase 是怎么用的"
+  ]
+}

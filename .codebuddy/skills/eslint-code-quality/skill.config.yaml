@@ -1,0 +1,44 @@
+# ── 触发与优先级 ──
+priority: 90
+auto-trigger: true
+trigger-keywords:
+    - 代码规范
+    - lint check
+    - ESLint
+    - Stylelint
+    - 代码检查
+    - 格式化
+    - 修复lint
+    - 类型检查
+    - tsc
+    - ts错误
+    - 初始化规则
+    - 规则知识库
+    - prettier
+    - 代码质量
+
+# ── 依赖关系 ──
+depends-on: []
+mutual-exclude: [code-review-check]
+require-tools: [read_file, write_file, search_content, execute_command]
+
+# ── 生命周期 ──
+load-strategy: lazy
+unload-after-run: true
+max-duration: 300
+
+# ── 触发权重 ──
+trigger-weight:
+    代码规范: 95
+    lint check: 90
+    ESLint: 90
+    代码检查: 85
+    格式化: 80
+    修复lint: 85
+    类型检查: 85
+    tsc: 75
+    ts错误: 80
+    初始化规则: 70
+    规则知识库: 65
+    prettier: 60
+    代码质量: 55

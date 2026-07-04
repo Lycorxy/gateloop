@@ -1,0 +1,34 @@
+# ── 触发与优先级 ──
+priority: 85
+auto-trigger: true
+trigger-keywords:
+    - 生成前端代码
+    - 创建组件
+    - 写tsx
+    - 新建页面
+    - 代码生成
+    - 修改组件
+    - 拆分组件
+    - 前端开发
+
+# ── 依赖关系 ──
+depends-on: [specflow-rules-engine, eslint-code-quality, css-style-writer, frontend-backend-integration]
+mutual-exclude: [admin-ui-design, frontend-design]
+require-tools:
+    [read_file, write_file, replace_in_file, search_content, search_file, execute_command, list_dir, use_skill]
+
+# ── 生命周期 ──
+load-strategy: lazy
+unload-after-run: true
+max-duration: 600
+
+# ── 触发权重 ──
+trigger-weight:
+    生成前端代码: 95
+    创建组件: 90
+    写tsx: 85
+    新建页面: 85
+    代码生成: 90
+    修改组件: 85
+    拆分组件: 80
+    前端开发: 75

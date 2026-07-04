@@ -1,0 +1,27 @@
+node_modules
+dist
+bin
+
+# node-ultra 配置文件
+.nut/
+
+# AI 版本管理存储
+.aivnsions/
+
+# hook 运行时缓存和日志（自动生成）
+.codebuddy/.aivn-cache.json
+.codebuddy/*-debug.log
+hook-debug.log
+temp-debug/
+
+# knowledge base（大量 markdown 文件，不需要版本管理）
+.codebuddy/knowledge/
+
+# local secrets
+.codebuddy/.secrets
+
+# 外部仓库引用（含嵌套 git，不纳入主仓库）
+仓库/
+
+# 知识库资源
+知识库/

@@ -1,0 +1,32 @@
+# ── 触发与优先级 ──
+priority: 70
+auto-trigger: false
+trigger-keywords:
+  - Proto设计
+  - 设计后端接口
+  - 设计表结构
+  - 设计Proto
+  - DB Schema设计
+  - 数据库表设计
+  - 设计DDL
+  - 后端接口设计
+
+# ── 依赖关系 ──
+depends-on: [specflow-rules-engine]
+mutual-exclude: [frontend-codegen, node-backend-codegen]
+
+# ── 生命周期 ──
+load-strategy: lazy
+unload-after-run: true
+max-duration: 180
+
+# ── 触发权重 ──
+trigger-weight:
+  Proto设计: 85
+  设计后端接口: 80
+  设计表结构: 80
+  设计Proto: 85
+  DB Schema设计: 75
+  数据库表设计: 75
+  设计DDL: 70
+  后端接口设计: 75

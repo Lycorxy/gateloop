@@ -1,0 +1,43 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+           "name": "Debug npm script",
+           "type": "node",
+           "request": "launch",
+           "runtimeExecutable": "npm",
+           "runtimeArgs": ["run", "ci"],
+           "cwd": "${workspaceFolder}/packages/cli/example",
+           "console": "integratedTerminal"
+        },
+        // {
+		// 	"name": "Debug Current Test File",
+        //     "type": "node",
+		// 	"request": "launch",
+        //     "runtimeExecutable": "npm",
+		// 	"skipFiles": ["<node_internals>/**", "**/node_modules/**"],
+		// 	"cwd": "${workspaceFolder}/packages/cli/example",
+        //     "runtimeArgs": ["run", "tine pipe"],
+        //      "console": "integratedTerminal"
+        // },
+        // {
+		// 	"name": "Debug Current Test File",
+        //     "type": "node",
+		// 	"request": "launch",
+		// 	"skipFiles": ["<node_internals>/**", "**/node_modules/**"],
+		// 	"cwd": "${workspaceFolder}/packages/babel-plugin-jsx-dom-string/example",
+        //     "program": "index.js"
+        // },
+        // {
+		// 	"name": "Debug Current Test File",
+        //     "type": "node",
+		// 	"request": "launch",
+		// 	"skipFiles": ["<node_internals>/**", "**/node_modules/**"],
+		// 	"cwd": "${workspaceFolder}/packages/eslint-plugin",
+        //     "program": "${workspaceFolder}/node_modules/jest/bin/jest"
+        // }
+    ]
+}

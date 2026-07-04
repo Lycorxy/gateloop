@@ -1,0 +1,77 @@
+---
+description: CSS/SCSS 最优样式设计强制约束。当执行 css-style-writer、编写样式文件时必遵守。包含：扁平结构、动态类名规范、Token系统、最优设计原则（最少DOM/最少CSS）、属性顺序、反模式清单。
+alwaysApply: true
+enabled: true
+updatedAt: 2026-07-03T11:30:00.000Z
+provider:
+---
+
+# CSS/SCSS 样式编写 — 核心铁律
+
+## 铁律 1 — 扁平结构（最高优先级）
+
+```
+绝对禁止嵌套选择器。所有伪类/伪元素在独立选择器中声明。
+✓ .<className>:hover { ... }  ← 伪类独立平铺
+✗ .<className> { .child { ... } }  ← 子选择器嵌套
+✗ .<className> .child { ... }  ← 级联选择器
+```
+
+## 铁律 2 — 类名规范（动态检测）
+
+```
+优先级1: stylelint selector-class-pattern → camelCase/kebab/snake/Pascal
+优先级2: CSS Module → 通常 camelCase (styles.className)
+优先级3: 项目既有风格 → 跟随现有代码
+```
+
+## 铁律 3 — CSS 变量
+
+```
+✓ var(--primary-color, #fff)  |  ✗ #ffffff(硬编码)
+✓ 使用项目自身变量名  |  ✗ 强推默认 Token 名
+```
+
+## 铁律 4 — 最优设计原则
+
+```
+DOM最小化：装饰用伪元素/分隔用border/计数用counter-increment
+CSS最大化：flex+gap/currentColor/composes(CSS Module)/clamp()/aspect-ratio
+DRY：公共基类+composes / 可继承不重复 / 相同状态合并
+属性顺序：定位→盒模型→排版→视觉→动效→其他
+```
+
+## 铁律 5 — 尺寸
+
+```
+按钮/输入框=40px | 表格行/表头=48px | 标题≤18px
+按钮圆角=2px(--radius-sm) | 卡片圆角=8px(--radius-lg)
+```
+
+## 铁律 6 — 卡片三件套
+
+```scss
+.card { background:var(--color-n-01,#fff); border:1px solid var(--color-n-03,#ebebeb); border-radius:var(--radius-lg,8px); box-shadow:var(--shadow-sm,0 1px 2px rgba(0,0,0,.04)); }
+```
+
+## 铁律 7 — 表格对齐
+
+```
+文字:left | 数字:right+tabular-nums | 状态:center | 操作:right
+```
+
+## 铁律 8 — 全状态覆盖
+
+```
+交互元素：Default+Hover+Focus/Active+Disabled
+数据区：Loading(Skeleton)+Empty(CTA)+Error(错误引导)
+```
+
+## 反模式速查
+
+```
+□ 禁止嵌套 | □ 禁止硬编码颜色/间距 | □ 禁止!important
+□ z-index≤1000 | □ min-h-dvh(非h-screen) | □ 100%(非100vw)
+□ 禁止:has()/@container/@layer/subgrid | □ border:0(非none)
+□ 禁止@import(用@use) | □ 禁止动画width/height/top/left
+□ 禁止装饰性真实DOM(用伪元素) | □ 禁止重复继承属性
