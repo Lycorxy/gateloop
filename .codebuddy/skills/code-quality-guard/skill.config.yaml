@@ -6,6 +6,7 @@ trigger-keywords:
     - lint check
     - ESLint
     - Stylelint
+    - Prettier
     - 代码检查
     - 格式化
     - 修复lint
@@ -14,13 +15,14 @@ trigger-keywords:
     - ts错误
     - 初始化规则
     - 规则知识库
-    - prettier
     - 代码质量
+    - prettier格式化
+    - 代码格式
 
 # ── 依赖关系 ──
 depends-on: []
 mutual-exclude: [code-review-check]
-require-tools: [read_file, write_file, search_content, execute_command]
+require-tools: [read_file, write_file, replace_in_file, search_content, search_file, execute_command, list_dir]
 
 # ── 生命周期 ──
 load-strategy: lazy
@@ -33,12 +35,14 @@ trigger-weight:
     lint check: 90
     ESLint: 90
     代码检查: 85
-    格式化: 80
+    格式化: 85
+    Prettier: 85
     修复lint: 85
     类型检查: 85
-    tsc: 75
+    prettier格式化: 85
     ts错误: 80
+    tsc: 75
     初始化规则: 70
     规则知识库: 65
-    prettier: 60
+    代码格式: 65
     代码质量: 55

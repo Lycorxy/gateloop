@@ -1,0 +1,146 @@
+---
+description: 代码质量管控铁律。ESLint+Prettier+Stylelint+TypeScript 四工具核心规范，alwaysApply 全局注入，代码生成时必须强制遵守。
+alwaysApply: true
+enabled: true
+updatedAt: 2026-07-09T11:28:00.000Z
+provider:
+---
+
+# 代码质量管控 — 核心铁律
+
+> 以下规则在**代码生成时就必须遵守**，不是"检查时再修"。
+> alwaysApply: true → 自动注入 System Prompt → 生成代码时即约束。
+
+## 铁律 0 — 步骤严格执行
+
+必须按 SKILL.md 定义的顺序严格执行每一步。跳过须逐条声明理由并说明不影响结果。禁止批量跳过，禁止无声跳过。
+**Step 0 强制**：`npx nut-lint extract --check` 检测规则变更。
+
+## 铁律 1 — 文件与函数规模
+
+```
+单文件 ≤ 360 行（TSX/TS/SCSS）
+单函数 ≤ 25 行，缩进 ≤ 2 层
+超出必须拆分，无豁免
+```
+
+## 铁律 2 — 圈复杂度
+
+```
+圈复杂度 ≤ 10，超出必须拆分函数
+衡量标准：独立执行路径数（if/else/for/while/&&/||/case 各 +1）
+```
+
+## 铁律 3 — 格式规范（Prettier 层）
+
+```
+引号    → 仅单引号 '
+分号    → 不使用
+缩进    → 2 空格
+行宽    → ≤ 100 字符
+尾逗号   → es5（数组和对象最后一项加逗号，函数参数不加）
+换行    → LF（\n）
+```
+
+## 铁律 4 — TypeScript 类型规范
+
+```
+□ 显式返回类型：所有导出函数必须有返回类型标注
+□ 禁止 any：必须定义 interface/type
+□ 简单类型用 T[]（string[]、number[]）
+□ 非简单类型用 Array<T>（Array<Record<string, unknown>>）
+□ 严格比较：=== / !==，禁止 == / !=
+□ err 类型守卫：catch(err) { err instanceof Error ? err.message : String(err) }
+□ 消除 floating promise：void message.error(...) / void fn()
+□ 禁用空 catch 块：必须至少记录错误或返回兜底值
+□ fail-fast：入口处先验证参数合法性
+□ async 函数禁止直接传事件属性：
+  ✗ onClick={handleSave}         // handleSave 返回 Promise<void>
+  ✓ onClick={() => { void handleSave(); }}
+□ JSON.parse 必须 try/catch + 默认值
+□ 数组操作前必须 Array.isArray() 校验
+```
+
+## 铁律 5 — 命名规范
+
+```
+变量/函数 → camelCase
+常量     → UPPER_SNAKE_CASE
+类/接口/类型 → PascalCase
+文件名   → kebab-case（组件文件除外用 PascalCase）
+CSS 类名 → 由 stylelint selector-class-pattern 决定（见 css-style-writer 铁律 2）
+```
+
+## 铁律 6 — Import 规范
+
+```
+顺序：1.Node内置(node:) → 2.第三方(字母序) → 3.@/别名 → 4.相对(./) → 5.样式(.scss)最后
+□ 按需解构导入，禁止 import *
+□ 未使用的导入必须删除
+□ 类型导入用 import type 分离
+□ Node 内置模块必须用 node: 前缀（import { join } from 'node:path'）
+□ CJS 模块用 createRequire（const req = createRequire(import.meta.url)）
+```
+
+## 铁律 7 — 禁止项
+
+```
+□ eslint-disable 注释 → 禁止（从根本上修复问题）
+□ console.log → 禁止（调试代码除外）
+□ as any → 避免，优先用正确类型
+□ eval() / new Function() → 禁止
+□ dangerouslySetInnerHTML / innerHTML 渲染用户输入 → 禁止
+```
+
+## 铁律 8 — 样式规范（Stylelint 层）
+
+```
+□ 禁止硬编码颜色（#fff）→ var(--color-xxx, fallback)
+□ 禁止硬编码间距（16px）→ var(--space-xxx, fallback)
+□ 扁平结构：禁止嵌套选择器，伪类独立平铺
+□ 属性顺序：定位 → 盒模型 → 排版 → 视觉 → 动效
+□ 禁止 !important（覆盖第三方库除外）
+□ 禁止 border: none → 用 border: 0
+□ 禁止 @import → 用 @use
+□ 禁止动画 width/height/top/left → 用 transform/opacity
+□ 禁止 :has() / @container / @layer / subgrid
+□ z-index ≤ 1000
+□ 禁止 100vw → 用 100%
+□ 禁止 h-screen → 用 min-h-dvh
+```
+
+## 铁律 9 — 安全约束
+
+```
+□ URL 参数拼接用 URLSearchParams / encodeURIComponent
+□ 禁止 token 存 localStorage（必须 httpOnly cookie）
+□ 禁止前端硬编码密钥/token（从环境变量获取）
+□ 禁止日志输出用户敏感数据
+```
+
+## 铁律 10 — 工具职责
+
+```
+Prettier → 代码格式（引号/分号/缩进/行宽/换行）— 美化
+ESLint   → 代码质量（未使用变量/复杂度/最佳实践）— 检查+修复
+Stylelint→ 样式规范（选择器/属性/颜色格式）— 样式检查+修复
+tsc      → 类型安全（类型错误/隐式 any）— 类型检查
+四者不冲突：Prettier 先跑，ESLint/Stylelint 后跑，tsc 最后
+```
+
+## 铁律 11 — 修复优先级
+
+```
+TS2304(缺少导入) → TS2345/TS2322(参数类型) → TS2532(undefined)
+→ TS7006(隐式any) → TS6133(未使用)
+```
+
+## 铁律 12 — 验证清单
+
+```
+□ 文件 ≤ 360 行 | □ 函数 ≤ 25 行 | □ 圈复杂度 ≤ 10
+□ 单引号/无分号/2空格/行宽≤100 | □ 显式返回类型/无any
+□ === 比较 | □ import 顺序正确/无 import * | □ 无 eslint-disable
+□ 无 console.log | □ 无硬编码颜色/间距 | □ 扁平结构
+□ Prettier 格式统一 | □ ESLint 0 错误 | □ Stylelint 0 错误 | □ tsc 0 类型错误
+```

@@ -17,7 +17,7 @@ trigger-keywords:
     - 后端代码
 
 # ── Dependencies ──
-depends-on: [specflow-rules-engine, eslint-code-quality]
+depends-on: [specflow-rules-engine, code-quality-guard]
 mutual-exclude: [frontend-codegen, backend-trpc-codegen]
 require-tools: [read_file, write_file, search_content, execute_command, use_skill]
 

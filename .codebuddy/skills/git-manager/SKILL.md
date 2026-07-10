@@ -4,7 +4,7 @@ description: >
     Git 操作封装：暂存、提交、回退（基于快照）、差异对比、分支管理、Stash、
     换行符修复、SSH 一键配置。当用户说 git add、git commit、暂存、提交、
     回退代码、查看差异、切换分支、stash、修复换行符、配置 SSH 时使用。
-    不要用于 AI 会话版本管理（使用 aivn-manager）、纯代码质量检查（使用 eslint-code-quality）。
+    不要用于 AI 会话版本管理（使用 aivn-manager）、纯代码质量检查（使用 code-quality-guard）。
 version: 2.0.0
 dependencies: []
 conflict-with: []
@@ -15,6 +15,13 @@ max-token: 1000
 # Git 操作管理器 — 命令执行手册
 
 > **原则**：分析用户意图 → 匹配命令 → 直接执行。不出错不多说，遇错再排查。
+
+## 🛑 入口守卫
+
+```
+本 Skill 为命令执行手册，需严格按操作流程执行。
+如需跳过任一操作步骤，必须逐条给出充足理由说明跳过不影响结果。
+```
 
 ## 前置条件
 

@@ -11,13 +11,30 @@ description: >
     Go 后端（→ backend-trpc-codegen）、
     数据库设计（→ mysql-schema-design）、纯架构讨论。
 version: 1.2.0
-dependencies: [specflow-rules-engine, eslint-code-quality]
+dependencies: [specflow-rules-engine, code-quality-guard]
 conflict-with: [frontend-codegen, backend-trpc-codegen]
 allowed-tools: [read_file, write_file, search_content, execute_command, use_skill]
 max-token: 2000
 ---
 
 # Node.js 后端代码生成 v1.2
+
+## 🛑 入口守卫
+
+```
+本 Skill 被 use_skill 加载后，必须按顺序执行 Step 0→1→2→3→4→5→6 全部步骤。
+每步必须播报对应完成消息。未播报的步骤 = 未执行 = 违规。
+
+禁止行为：
+  ✗ 跳过 Step 0 直接写代码
+  ✗ 不播报完成消息（无日志 = 没走流程）
+  ✗ 无声跳过任何步骤
+
+【强制 · 步骤严格执行】
+  如需跳过未执行的步骤，必须逐条给出充足理由：
+  ① 该步骤为什么可跳过  ② 跳过不影响最终交付质量
+  禁止用一条理由批量跳过多个步骤。
+```
 
 **核心定位：像一个资深 Node.js 工程师那样，生成符合项目规范的 TypeScript 后端代码。**
 
@@ -46,7 +63,7 @@ max-token: 2000
 - Go 后端代码（→ backend-trpc-codegen）
 - 数据库表设计（→ mysql-schema-design）
 - 纯架构讨论或技术选型
-- 代码审查（→ eslint-code-quality）
+- 代码审查（→ code-quality-guard）
 
 ---
 
@@ -132,10 +149,10 @@ max-token: 2000
 use_skill('specflow-rules-engine') // 同步 RULE.mdc → .codebuddy/rules/ + 检测注入 + read_file 兜底
 ```
 
-此外还需要加载 eslint-code-quality 规则：
+此外还需要加载 code-quality-guard 规则：
 
 ```typescript
-use_skill('eslint-code-quality')
+use_skill('code-quality-guard')
 ```
 
 > **完成播报（必须逐字输出）：**
@@ -143,7 +160,7 @@ use_skill('eslint-code-quality')
 > ```
 > ✅ [Step 0] 规则注入完成
 >   ▸ 注入方式：specflow-rules-engine（alwaysApply: true）
->   ▸ eslint-code-quality 规则已加载
+>   ▸ code-quality-guard 规则已加载
 >   ▸ 核心铁律已在上下文中
 > ```
 >
@@ -209,7 +226,7 @@ ESLint: 无分号 / 单引号 / 2空格 / object-curly-spacing: always
 
 ## Step 2 — 提取 Node 规则 [中自由度 · 强制]
 
-> **eslint-code-quality 已在 Step 0 加载。此步骤仅提取 Node.js 后端专用的 10 条强制规则。**
+> **code-quality-guard 已在 Step 0 加载。此步骤仅提取 Node.js 后端专用的 10 条强制规则。**
 
 ### 2.1 必读文档
 
@@ -238,7 +255,7 @@ read_file('.codebuddy/skills/node-backend-codegen/references/node-eslint-rules.m
 > ```
 > □ references/node-eslint-rules.md 已读取
 > □ 10 条核心规则已确认就绪
-> □ eslint-code-quality 规则已注入
+> □ code-quality-guard 规则已注入
 
 ---
 
@@ -533,7 +550,7 @@ npx eslint <file_path>
 
 ### 交付清单
 
-- [ ] 规则注入已完成（specflow-rules-engine + eslint-code-quality）
+- [ ] 规则注入已完成（specflow-rules-engine + code-quality-guard）
 - [ ] helpers 公共函数已复用 | node: 按需导入 | createRequire 正确使用
 - [ ] tsc --noEmit 通过 | ESLint 通过
 - [ ] 🚫 未生成测试文件

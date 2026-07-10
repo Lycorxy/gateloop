@@ -10,7 +10,7 @@
 ❌ "这个字段用什么类型比较好"
 ```
 
-## 2. 代码审查/Lint（→ eslint-code-quality 或 Go 原生工具）
+## 2. 代码审查/Lint（→ code-quality-guard 或 Go 原生工具）
 
 ```
 ❌ "帮我检查这段 Go 代码"

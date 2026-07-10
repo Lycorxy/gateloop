@@ -1,6 +1,6 @@
 # Node.js 后端 ESLint 规则详细说明
 
-从 eslint-code-quality 知识库中提取的、与 Node.js 后端代码生成直接相关的 ESLint 规则。
+从 code-quality-guard 知识库中提取的、与 Node.js 后端代码生成直接相关的 ESLint 规则。
 
 ## 核心格式化规则
 

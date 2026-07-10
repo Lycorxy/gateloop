@@ -1,12 +1,12 @@
 ---
 name: frontend-codegen
 description: >
-    前端代码生成唯一入口。自动编排 specflow-rules-engine + eslint-code-quality，
+    前端代码生成唯一入口。自动编排 specflow-rules-engine + code-quality-guard，
     并根据任务类型动态委派 css-style-writer（样式）或 frontend-backend-integration（联调）。
     任何涉及前端代码生成/修改的 Skill（specflow-dev, specflow-fix）都必须通过本 Skill。
-version: 7.1.0
+version: 7.2.0
 dependencies:
-    [specflow-rules-engine, eslint-code-quality, css-style-writer, frontend-backend-integration]
+    [specflow-rules-engine, code-quality-guard, css-style-writer, frontend-backend-integration]
 allowed-tools:
     [read_file, write_file, replace_in_file, search_content, search_file, execute_command, list_dir]
 max-token: 1500
@@ -23,12 +23,17 @@ max-token: 1500
 禁止行为：
   ✗ 加载 Skill 后跳过 Step 0 直接写代码
   ✗ 用 read_lints 替代 Step 5/6 的 npx nut-lint fix + npx nut-lint run
-  ✗ 跳过 Step 2 us_skill("eslint-code-quality")
+  ✗ 跳过 Step 2 us_skill("code-quality-guard")
   ✗ 跳过 Step 3 任务类型判定表
   ✗ 不播报完成消息（无日志 = 没走流程）
 
 唯一例外：同会话已执行并播报过的步骤可跳过，但必须声明：
   ⏭️ [跳过] Step N — 原因 | 风险
+
+【强制 · 步骤严格执行】
+  如需跳过未执行的步骤，必须逐条给出充足理由：
+  ① 该步骤为什么可跳过  ② 跳过不影响最终交付质量
+  禁止用一条理由批量跳过多个步骤。
 ```
 
 **核心定位：不是"写前端代码"，而是"像一个前端架构师那样，先检测环境、再判定路径、委派专家、最后验证交付"。**
@@ -76,7 +81,7 @@ max-token: 1500
                           ↓
 ┌─────────────────────────────────────────────────────────┐
 │  Step 2: Lint 规则加载 [中自由度·强制]                  │
-│  ↓ use_skill("eslint-code-quality")                    │
+│  ↓ use_skill("code-quality-guard")                    │
 │  ↓ ⚠️ 未加载规则 = 代码可能不符合项目规范              │
 └─────────────────────────────────────────────────────────┘
                           ↓
@@ -239,7 +244,7 @@ read_file('.stylelintrc.cjs') // 样式 lint 规则（★ 样式任务必需）
 ## Step 2 — Lint 规则加载 [中自由度 · 强制]
 
 ```typescript
-use_skill('eslint-code-quality')
+use_skill('code-quality-guard')
 // 负责：知识库初始化、规则注入、代码格式化、Lint 验证、TS 类型检查
 ```
 
@@ -405,7 +410,7 @@ index.module.scss   ≤ 200 行（★ 由 css-style-writer 负责）
 ## Step 5 — 格式化 + 验证 [低自由度 · 强制]
 
 ```typescript
-use_skill('eslint-code-quality') // npx nut-lint fix + npx nut-lint run
+use_skill('code-quality-guard') // npx nut-lint fix + npx nut-lint run
 ```
 
 > 完成播报：`"✅ Step 5 格式化验证完成"` — 有错误必须修复后再继续。
@@ -424,7 +429,7 @@ use_skill('eslint-code-quality') // npx nut-lint fix + npx nut-lint run
 ## Step 6 — 全量验证 [低自由度 · 强制]
 
 ```typescript
-use_skill('eslint-code-quality') // npx nut-lint run + tsc --noEmit → 0 错误
+use_skill('code-quality-guard') // npx nut-lint run + tsc --noEmit → 0 错误
 ```
 
 > 完成播报：`"✅ Step 6 全量验证通过"` — 0 错误才能交付。
