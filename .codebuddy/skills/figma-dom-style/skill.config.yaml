@@ -1,0 +1,157 @@
+# ── 触发与优先级 ──
+priority: 85
+auto-trigger: true
+trigger-keywords:
+  - 优化DSL还原
+  - figma还原优化
+  - 像素级对比迭代
+  - 迭代优化到95%
+  - 还原度不够
+  - 继续优化还原
+  - dsl优化
+  - Figma DSL
+  - 设计稿还原
+
+# ── 依赖关系 ──
+# 🔒 depends-on 必须包含 specflow-rules-engine（规则注入引擎）
+depends-on:
+  - specflow-rules-engine
+mutual-exclude: []
+require-tools:
+  - mcp_call_tool
+  - read_file
+  - write_to_file
+  - execute_command
+
+# ── 生命周期 ──
+load-strategy: lazy
+unload-after-run: true
+max-duration: 300
+
+# ── 触发权重 ──
+trigger-weight:
+  优化DSL还原: 95
+  figma还原优化: 90
+  像素级对比迭代: 88
+  迭代优化到95%: 85
+  还原度不够: 80
+  继续优化还原: 75
+  dsl优化: 70
+  Figma DSL: 65
+  设计稿还原: 60
+
+# ── MCP 能力声明（编排器探测用，skill 不直接读取）──
+# figma-trimly MCP 是本 skill 的核心工具，提供 Figma 数据获取/渲染/对比
+# 无 MCP 时：html-render/image-compare 可降级内置工具；figma-baseline 无降级（block）
+mcp-capabilities:
+  - server: "figma-trimly"            # Figma MCP：DSL获取/渲染/对比
+    optional: false                   # false=核心依赖，缺失时 figma-baseline 阻断
+
+# ── 数据契约（step-contracts）──
+# MCP 调用通过契约获取子流程执行，核心逻辑零 MCP 工具名
+# 详见 skill-creator-pro/references/contract-pattern.md
+step-contracts:
+  # Step 1 契约：Figma 基准材料（硬依赖，无内置降级，block）
+  - id: figma-baseline
+    step: "1"
+    name: "获取 Figma 基准材料（figma DSL+原版截图+渲染图）"
+    criticality: required             # 硬依赖：无 Figma 数据无法还原
+    input:
+      figma_url: "Figma URL（含 node-id）"
+      out_dir: "临时目录 .trimly/tmp/{fileKey}_{nodeId}/"
+    output:
+      dsl_json: "figma DSL 测量报告路径 (origin-dsl.json)"
+      origin_png: "原版截图路径 (origin.png)"
+      render_png: "绝对定位渲染图路径 (render.png)"
+      diff_png: "baseline 对比图路径 (diff.png)"
+    providers:
+      - mcp:                          # 优先级 1：MCP（存在时必调用）
+          server: "figma-trimly"
+          tool: "figma_baseline_compare"
+          params:
+            url: "{input.figma_url}"
+            outDir: "{input.out_dir}"
+      - fallback: "ask-user"          # 优先级 2：无内置降级，问用户
+    on-missing: block                 # 硬依赖：无法获取则阻断
+
+  # Step 2 契约：交互流程 DSL（软依赖，无交互标注可跳过）
+  - id: figma-interaction
+    step: "2"
+    name: "获取 Figma 交互流程 DSL"
+    criticality: preferred            # 软依赖：有则生成交互状态 CSS，无则仅静态还原
+    input:
+      figma_url: "Figma URL"
+    output:
+      interaction_dsl: "交互流程 DSL（场景/节点链路/事件/动画/虚拟节点）"
+    providers:
+      - mcp:                          # 优先级 1：MCP
+          server: "figma-trimly"
+          tool: "figma_to_interaction_dsl"
+          params:
+            url: "{input.figma_url}"
+      - fallback: "none"              # 优先级 2：无降级，跳过交互还原
+    on-missing: degrade               # 软依赖：降级为仅静态视觉还原
+
+  # Step 4 契约 1：HTML 渲染为 PNG（硬依赖，可降级 Playwright）
+  - id: html-render
+    step: "4"
+    name: "临时 HTML 渲染为 PNG"
+    criticality: required             # 硬依赖：无渲染图无法对比
+    input:
+      html: "从 DOM+Style DSL 生成的临时 HTML 字符串"
+      width: "渲染宽度（figma DSL metadata.width）"
+      height: "渲染高度（figma DSL metadata.height）"
+      out_dir: "临时目录"
+    output:
+      render_png: "渲染图路径 (iter-{N}-render.png)"
+    providers:
+      - mcp:                          # 优先级 1：MCP
+          server: "figma-trimly"
+          tool: "html_to_image"
+          params:
+            html: "{input.html}"
+            width: "{input.width}"
+            height: "{input.height}"
+            scale: 2
+            outDir: "{input.out_dir}"
+      - builtin:                      # 优先级 2：内置工具降级
+          strategy: "execute_command Playwright CLI"
+          description: "用 Playwright 截图渲染临时 HTML"
+      - fallback: "ask-user"          # 优先级 3
+    on-missing: block                 # 硬依赖：无法渲染则阻断
+
+  # Step 4 契约 2：图片像素对比（硬依赖，可降级 pixelmatch 脚本）
+  - id: image-compare
+    step: "4"
+    name: "渲染图 vs 原版图像素对比"
+    criticality: required             # 硬依赖：无对比无法验收
+    input:
+      render_png: "渲染图路径"
+      origin_png: "原版截图路径"
+      out_dir: "临时目录"
+    output:
+      diff_png: "对比图路径 (iter-{N}-diff.png)"
+      similarity: "相似度百分比"
+      ssim: "SSIM 值"
+    providers:
+      - mcp:                          # 优先级 1：MCP
+          server: "figma-trimly"
+          tool: "compare_images"
+          params:
+            imageA: "{input.render_png}"
+            imageB: "{input.origin_png}"
+            outDir: "{input.out_dir}"
+      - builtin:                      # 优先级 2：内置工具降级
+          strategy: "execute_command html-compare.ts"
+          description: "pixelmatch 脚本对比，输出 diff 图 + 相似度"
+      - fallback: "ask-user"          # 优先级 3
+    on-missing: block                 # 硬依赖：无法对比则阻断
+
+# ── v8 变更说明 ──
+description: |
+  v8 核心变化（基于 v7）：
+  1. 重命名 figma-dsl-optimizer → figma-dom-style
+  2. MCP 调用契约化：4 个 step-contracts，核心逻辑零 MCP 工具名
+  3. figma-baseline/interaction/html-render/image-compare 通过契约获取子流程调用
+  4. html-render/image-compare 支持 MCP→内置工具降级（Playwright/pixelmatch）
+  v7 沿用：输出 DOM+Style DSL（JSON）/ 临时 HTML 仅验证 / 6阶段 / 标注驱动 / 交互DSL驱动

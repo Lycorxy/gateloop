@@ -20,7 +20,9 @@ trigger-keywords:
     - 代码格式
 
 # ── 依赖关系 ──
-depends-on: []
+# 🔒 depends-on 必须包含 specflow-rules-engine（规则注入引擎）
+depends-on:
+    - specflow-rules-engine
 mutual-exclude: [code-review-check]
 require-tools: [read_file, write_file, replace_in_file, search_content, search_file, execute_command, list_dir]
 

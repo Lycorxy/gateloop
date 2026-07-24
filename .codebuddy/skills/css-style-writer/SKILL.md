@@ -7,31 +7,34 @@ description: >
     充分挖掘CSS原生能力（继承/伪元素/gap/flex隐式属性等）。
     严格遵循扁平结构（禁止嵌套class），使用CSS变量Token系统，
     自动检测构建配置确定CSS Module范围和类名规范。
+    严格按规范执行，禁止跳过，自审+stylelint验证通过才交付。
     不要用于：设计页面布局（→ admin-ui-design）、写组件逻辑、工程化配置、
     Tailwind CSS（→ 直接写 className）、styled-components 等 CSS-in-JS 方案。
-version: 4.1.0
+version: 5.0.0
 dependencies: [specflow-rules-engine]
 conflict-with: [admin-ui-design]
 allowed-tools: [read_file, write_file, replace_in_file, search_content, execute_command]
 max-token: 1500
 ---
 
-# CSS Style Writer v4.1 — 最优样式设计
+# CSS Style Writer v5.0 — 最优样式设计（禁止跳过）
 
-## 🛑 入口守卫
+## 🛑 入口守卫（不可绕过·禁止跳过）
 
 ```
-本 Skill 加载后必须按 Step 0→1→...→6 顺序执行全部步骤。
+本 Skill 加载后必须按 Step 0→1→2→3→4→5→6 顺序执行全部步骤。
 每步播报完成消息，未播报 = 未执行 = 违规。
-禁止跳步，禁止跳过规则注入（Step 0）。
 
-【强制 · 步骤严格执行】
-  如需跳过未执行的步骤，必须逐条给出充足理由：
-  ① 该步骤为什么可跳过  ② 跳过不影响最终交付质量
-  禁止用一条理由批量跳过多个步骤，禁止无声跳过。
+禁止行为（不允许跳过）：
+  ✗ 跳过 Step 0 规则注入
+  ✗ 跳过 Step 1 环境检测
+  ✗ 跳过 Step 6 自审 + stylelint 验证
+  ✗ 自审不通过就交付（必须修复到通过）
+  ✗ 行数超限不拆分（SCSS ≤ 300 行）
+  ✗ 偷懒放宽规范（扁平结构/变量/尺寸是硬性约束）
 ```
 
-**核心定位：用最少的代码实现最好的效果，像CSS大师那样榨干每一个原生能力。**
+**核心定位：用最少的代码实现最好的效果，像 CSS 大师榨干每一个原生能力。严格按规范，不偷懒。**
 
 ---
 
@@ -46,81 +49,45 @@ max-token: 1500
 ## 步骤流程总览
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│  🔒 Step 0: 规则注入 — alwaysApply → specflow-rules-engine  │
-└─────────────────────────────────────────────────────────┘
-                          ↓
-┌─────────────────────────────────────────────────────────┐
-│  Step 1: 项目环境检测 — 类名规范/CSS Module/变量前缀       │
-└─────────────────────────────────────────────────────────┘
-                          ↓
-┌─────────────────────────────────────────────────────────┐
-│  Step 2: 加载设计 Token — 项目变量优先/fallback          │
-└─────────────────────────────────────────────────────────┘
-                          ↓
-┌─────────────────────────────────────────────────────────┐
-│  Step 3: CSS 架构决策 — DOM最小化/CSS特性/DRY           │
-└─────────────────────────────────────────────────────────┘
-                          ↓
-┌─────────────────────────────────────────────────────────┐
-│  Step 4: 生成样式代码 → Step 5: 全状态覆盖               │
-└─────────────────────────────────────────────────────────┘
-                          ↓
-┌─────────────────────────────────────────────────────────┐
-│  Step 6: 自审清单 — 不通过不交付                         │
-└─────────────────────────────────────────────────────────┘
+🔒 Step 0: 规则注入（强制·不可跳过）— specflow-rules-engine
+Step 1: 项目环境检测（强制）— 类名规范/CSS Module/变量前缀
+Step 2: 加载设计 Token（强制）— 项目变量优先/fallback
+Step 3: CSS 架构决策（强制）— DOM最小化/CSS特性/DRY
+Step 4: 生成样式代码
+Step 5: 全状态覆盖
+Step 6: 自审 + stylelint 验证（强制·不通过不交付）
 ```
 
-> 🔒 每步按序执行。跳过必须声明：`⏭️ [跳过] Step N — 理由 | 风险`
+> 🔒 每步按序执行，禁止跳过。不通过不交付。
 
 ---
 
-## 中断与恢复机制
+## 中断与恢复
 
-若执行过程被中断，重新继续时必须：
-
-1. **扫描已有输出** — 检查已完成的 Step
-2. **播报恢复点**：
-   ```
-   ⏯️ [恢复] 上次进度：X/6 步完成
-   已完成：✅ Step 0 — 规则注入
-           ✅ Step 1 — 环境检测 | ✅ Step 2 — Token 加载
-           ✅ Step 3 — 架构决策 | ✅ Step 4 — 编码
-           ✅ Step 5 — 状态覆盖 | ✅ Step 6 — 自审
-   待完成：⬜ Step N — {待完成步骤}
-   断点：从 Step N 继续
-   ```
-3. **从断点继续** — 不重复不遗漏
-4. **重启确认** — 播报后主动询问
+若中断后恢复：
+1. 扫描已有输出，确认完成的 Step
+2. 播报恢复点：`⏯️ [恢复] 已完成：Step0✅... | 断点：Step{N}`
+3. 从断点继续，不重复不遗漏
 
 ---
 
-## 🔒 Step 0 — 规则注入（强制 · 最高优先级 · 不可跳过）
+## 🔒 Step 0 — 规则注入（强制 · 不可跳过）
 
 ```
-【🔒 不可变约束】
-  Step 0 必须在任何样式编写操作之前完成。
-  未执行规则注入就开始写 CSS = 严重违规，必须立即停止并回退。
-  无任何豁免理由。
+未执行规则注入就写 CSS = 严重违规，立即停止回退。
 ```
 
-本 Skill 的 RULE.mdc 为 `alwaysApply: true`（全局规则），需走 **specflow-rules-engine** 同步到 System Prompt：
+RULE.mdc `alwaysApply: true`，走 specflow-rules-engine 同步到 System Prompt：
 
 ```typescript
 use_skill('specflow-rules-engine') // 同步 RULE.mdc → .codebuddy/rules/ + 检测注入 + read_file 兜底
 ```
 
-> **完成播报（必须逐字输出）：**
->
-> ```
-> ✅ [Step 0] 规则注入完成
->   ▸ 注入方式：specflow-rules-engine（alwaysApply: true）
->   ▸ 铁律 1-8 已就绪
-> ```
+> **播报：** `✅ [Step 0] 规则注入完成（specflow-rules-engine / alwaysApply: true / 铁律1-8就绪）`
 
 ---
 
-## Step 1 — 项目环境检测 [低自由度 · 强制]
+## Step 1 — 项目环境检测（强制 · 不可跳过）
 
 ### 1.1 检测内容
 
@@ -129,8 +96,8 @@ use_skill('specflow-rules-engine') // 同步 RULE.mdc → .codebuddy/rules/ + �
 | P0 | stylelint 类名规则 | `search_file('.stylelintrc*')` |
 | P1 | 依赖与框架 | `read_file('package.json')` |
 | P2 | CSS Module 范围 | `search_content('.module.scss')` |
-| P3 | 项目既有命名惯例 | `grep_search('^\.[a-zA-Z]', '*.scss')` |
-| P4 | 已有的 CSS 变量 | `grep_search('--color-', '*.{css,scss}')` |
+| P3 | 项目既有命名惯例 | `search_content('^[a-zA-Z]', '*.scss')` |
+| P4 | 已有的 CSS 变量 | `search_content('--color-', '*.{css,scss}')` |
 
 ### 1.2 检测清单
 
@@ -140,55 +107,49 @@ use_skill('specflow-rules-engine') // 同步 RULE.mdc → .codebuddy/rules/ + �
 □ CSS Module 判定 | □ 类名规范(三级fallback) | □ CSS 变量前缀
 ```
 
-> **验证检查点：**
-> ```
-> □ stylelint 配置已读取 | □ 框架已确认
-> □ CSS Module / 非 Module 已判定 | □ 类名规范已确定
-> ```
->
-> 完成播报：`"✅ Step 1 环境检测完成：{类名规范}/{CSS Module状态}"`
+> **播报：** `✅ Step 1 环境检测完成：{类名规范}/{CSS Module状态}`
 
 ---
 
-## Step 2 — 加载设计 Token [低自由度 · 强制]
+## Step 2 — 加载设计 Token（强制 · 不可跳过）
 
 ```typescript
-grep_search('--color-', '*.{css,scss}') // 项目颜色变量
-grep_search('--space-', '*.{css,scss}') // 项目间距变量
+search_content('--color-', '*.{css,scss}') // 项目颜色变量
+search_content('--space-', '*.{css,scss}') // 项目间距变量
 // 无项目变量 → read_file('.codebuddy/skills/admin-ui-design/knowledge/tokens.css')
 ```
 
-> 完成播报：`"✅ Step 2 Token加载完成：{项目变量N个 / fallback}"`
+> **播报：** `✅ Step 2 Token加载完成：{项目变量N个 / fallback}`
 
 ---
 
-## Step 3 — CSS 架构决策 [中自由度 · 强制]
+## Step 3 — CSS 架构决策（强制 · 不可跳过）
 
 按需加载 `references/style-rules.md` 第4章，输出决策摘要：
 
 ```
 📐 DOM 元素: N 个 | CSS 特性: flex+gap/伪元素/inherit
-   公共基类: X 个 | 预估行数: ~Z 行
+   公共基类: X 个 | 预估行数: ~Z 行（≤ 300）
 ```
 
-> **验证检查点：**
-> ```
-> □ DOM 最小化已考虑（伪元素替代装饰 DOM）
-> □ CSS 特性优先级已决策 | □ DRY 检查已完成
-> ```
+```
+□ DOM 最小化已考虑（伪元素替代装饰 DOM）
+□ CSS 特性优先级已决策 | □ DRY 检查已完成
+```
 
-> 完成播报：`"✅ Step 3 架构决策完成：{N}个DOM / {X}个基类"`
+> **播报：** `✅ Step 3 架构决策完成：{N}个DOM / {X}个基类`
 
 ---
 
-## Step 4 — 生成样式代码 [中自由度]
+## Step 4 — 生成样式代码
 
 - 类名规范由 Step 1 检测结果决定
 - 按需加载 `references/style-rules.md` 第4章模板
+- **SCSS 文件 ≤ 300 行，超限必须拆分（不偷懒）**
 
 ---
 
-## Step 5 — 全状态覆盖 [低自由度]
+## Step 5 — 全状态覆盖
 
 ```
 交互元素：Default + Hover + Focus/Active + Disabled
@@ -198,7 +159,9 @@ grep_search('--space-', '*.{css,scss}') // 项目间距变量
 
 ---
 
-## Step 6 — 自审清单 [低自由度 · 强制]
+## Step 6 — 自审 + stylelint 验证（强制 · 不通过不交付）
+
+### 6.1 自审清单
 
 ```
 【结构】□ 零嵌套 □ 装饰用伪元素 □ 分隔用border □ 可继承不重复
@@ -207,30 +170,43 @@ grep_search('--space-', '*.{css,scss}') // 项目间距变量
 【表格】□ 文字left 数字right 状态center 操作right
 【状态】□ hover/focus/disabled全覆盖 □ Skeleton非spinner
 【反模式】□ 无!important □ z-index≤1000 □ min-h-dvh □ @use
+【规模】□ SCSS 文件 ≤ 300 行（超限已拆分）
 ```
 
-> **验证检查点：**
-> ```
-> □ 6 项自审全部通过 | □ 无嵌套选择器 | □ 无硬编码颜色
-> □ 无 !important | □ 状态全覆盖 | □ 表格对齐正确
-> ```
+### 6.2 stylelint 验证（强制 · 不允许跳过）
 
-> 完成播报：`"✅ Step 6 自审完成：全部清单通过"`
+```bash
+npx nut-lint run <scss_file>
+# 或 npx nut-lint fix <scss_file> --write 自动修复
+```
+
+```
+□ stylelint: 0 错误
+□ 自审 7 项全部通过
+有错误 → fix --write（只跑一次）→ 逐条分析剩余 → 手动修不可自动修的 → 再验证
+⚠️ 禁止盲目循环跑 fix（不可自动修的选择器/属性必须手动改）
+不通过 → 必须修复到通过，不允许留给用户手动
+```
+
+> **播报：** `✅ Step 6 自审+验证完成：7项全通过 / stylelint 0错误` — 不通过不交付。
 
 ---
 
 ## 错误处理
 
-| 场景 | 处理方式 |
-|------|----------|
+| 场景 | 处理 |
+|------|------|
 | Tailwind CSS 项目 | 停止，告知直接写 `className="..."` |
 | styled-components / emotion | 停止，告知使用 CSS-in-JS 语法 |
 | 纯 vanilla HTML/CSS | Step 1 fallback，不确定则询问 |
-| 项目变量命名不符合约定 | 使用项目命名，不强行转换 |
+| SCSS 超 300 行 | 必须拆分，不偷懒超限交付 |
+| stylelint 有错误 | npx nut-lint fix --write 自动修复到 0 错误 |
+
+---
 
 ## 参考资料
 
 | 文件 | 内容 | 加载时机 |
-|------|------|----------|
+|------|------|---------|
 | `references/style-rules.md` | 铁律/Token表/CSS特性/DRY模板/尺寸/状态矩阵/反模式 | Step 2后按需 |
 | `tokens.css` (admin-ui-design) | 默认CSS变量 fallback | Step 2 无项目变量时 |

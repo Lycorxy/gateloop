@@ -7,7 +7,7 @@
 - [条件详情模式](#条件详情模式)
 - [视觉分析模式](#视觉分析模式)
 - [可验证中间输出](#可验证中间输出)
-- [MCP 工具集成](#mcp-工具集成)
+- [MCP 工具集成（契约模式）](#mcp-工具集成契约模式)
 - [包依赖管理](#包依赖管理)
 
 ---
@@ -224,47 +224,80 @@
 
 ---
 
-## MCP 工具集成
+## MCP 工具集成（契约模式）
 
-当你的 skill 使用 Model Context Protocol 工具时，遵循严格的命名约定。
+当 skill 需要 MCP 提供的知识库/上下文/记忆时，**不直接调用 MCP 工具**，而是通过数据契约声明 + 标准化获取子流程。
 
-### 规则：始终完全限定工具名称
+> 完整规范：[contract-pattern.md](contract-pattern.md)
 
-格式：`ServerName:tool_name`
+### 核心原则
 
-### 示例
+```
+skill 声明：Step N 需要 {contract-id} 数据（契约）
+skill 不写：Step N 调用 mcp__xxx__yyy（实现绑定）
 
-```markdown
-## 数据查询
-
-使用 BigQuery:biquery_schema 首先检索表 schema。
-然后使用 BigQuery:run_query 执行查询。
-
-## 问题跟踪
-
-使用 GitHub:create_issue 以下列格式提交 bug：
-- 标题：[BUG] 简要描述
-- 正文：复现步骤、预期 vs 实际
+MCP 存在 → 契约获取子流程调用 MCP，注入数据
+MCP 缺失 → 降级到内置工具 / 本地 / 问用户
 ```
 
-### 为什么这很重要
+### 铁律
 
-若无服务器前缀，Claude 在以下情况下无法定位工具：
-- 多个 MCP 服务器已加载
-- 服务器有名称相似的工具
-- 工具名称是通用的（例如 "query"、"create"）
+| 规则 | 要求 |
+|------|------|
+| 核心逻辑零 MCP 工具名 | MCP 调用只在"契约获取子流程"中，且格式标准化 |
+| providers 至少两级 | mcp + builtin/fallback，保证 MCP 挂了仍可用 |
+| 软依赖 on-missing: degrade | 本地能兜底的，MCP 缺失不阻断 |
+| 硬依赖 on-missing: block/ask | 运行时实时数据，缺则阻断或问用户 |
+| 核心逻辑只消费 output | 不判断数据来源，逻辑与实现解耦 |
 
-### 反模式
+### 契约声明（skill.config.yaml）
+
+```yaml
+step-contracts:
+  - id: schema-lookup
+    step: "1"
+    criticality: preferred
+    input: { table_name: "表名" }
+    output: { schema: "表结构", columns: "列定义" }
+    providers:
+      - mcp:
+          server: "BigQuery"
+          tool: "biquery_schema"
+          params: { table: "{input.table_name}" }
+      - fallback: "ask-user"
+    on-missing: degrade
+```
+
+### SKILL.md 正文写法
 
 ```markdown
-# 错误 — 无服务器前缀，歧义
-使用 query 工具运行 SQL。
-使用 create_issue 提交 bug。
+### Step 1：获取表结构
 
-# 正确 — 完全限定
-使用 BigQuery:run_query 执行 SQL。
-使用 GitHub:create_issue 提交 bug。
+🔒 数据契约：schema-lookup（preferred）
+
+#### 契约获取子流程
+按 providers 链获取 {schema, columns}：
+  1. MCP BigQuery:biquery_schema（优先）
+  2. fallback: ask-user
+播报来源。
+
+#### 核心逻辑
+1. 基于 schema 构建 SELECT 字段...
+2. 播报完成
 ```
+
+### 为什么不直接调用 MCP
+
+| 直接调用（❌） | 契约模式（✅） |
+|---------------|---------------|
+| `使用 BigQuery:run_query 执行 SQL` 写在核心逻辑里 | 核心逻辑只消费 output，MCP 调用在获取子流程 |
+| MCP 缺失 → skill 报错 | MCP 缺失 → 降级链兜底，仍可用 |
+| 换 MCP 服务器 → 改 skill | 换 MCP → 只改 config 的 providers |
+| skill 绑定特定 MCP | skill 契约解耦，可移植 |
+
+### 唯一例外：工具命名限定
+
+当契约获取子流程中需要调用 MCP 时，工具名必须完全限定为 `mcp__{server}__{tool}` 或 `{server}:{tool}` 格式，避免多 MCP 服务器歧义。但此调用仅限获取子流程，不进入核心逻辑。
 
 ---
 
