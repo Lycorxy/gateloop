@@ -18,12 +18,14 @@ const entries = {
     // CLI 入口
     lint: './src/cli/lint.ts',
     git: './src/cli/git.ts',
-    aivn: './src/cli/aivn.ts'
+    'ads-cli': './src/cli/ads.ts',
+    // 库入口
+    ads: './src/ads/index.ts'
 }
 
 // ==================== 需要添加 shebang 的文件 ====================
 
-const cliFiles = ['lint', 'git', 'aivn']
+const cliFiles = ['lint', 'git', 'ads-cli']
 
 // ==================== JS/TS 打包配置 ====================
 

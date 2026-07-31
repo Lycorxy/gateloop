@@ -35,7 +35,7 @@
  */
 
 import { GitManager } from '../git/index'
-import type { GitResult } from '../git/types'
+import type { GitResult, SSHSetupOptions, SSHAccount } from '../git/types'
 
 // ==================== 辅助函数 ====================
 
@@ -161,11 +161,13 @@ function printHelp(): void {
   nut-git lf --setup          配置 .gitattributes
 
 🔑 SSH 配置:
-  nut-git ssh setup           一键配置 SSH (GitHub)
-  nut-git ssh setup --gitlab  配置 GitLab
-  nut-git ssh setup --gitee   配置 Gitee
-  nut-git ssh status          查看 SSH 状态
-  nut-git ssh key             查看公钥
+  nut-git ssh setup [platform]              一键配置 SSH（github/gitlab/gitee/gitcode，默认 github）
+  nut-git ssh setup gitcode                 配置腾讯工蜂
+  nut-git ssh setup gitcode --token xxx     带 token
+  nut-git ssh multi --platform gitcode --accounts "personal:email,shared:email"
+  nut-git ssh troubleshoot                 诊断 SSH 问题
+  nut-git ssh status                        查看 SSH 状态
+  nut-git ssh key [host]                    查看公钥
 
 示例:
   nut-git stage --all
@@ -715,14 +717,23 @@ async function main(): Promise<void> {
             // ==================== SSH ====================
             case 'ssh': {
                 if (subcommand === 'setup' || !subcommand) {
-                    let platform: 'github' | 'gitlab' | 'gitee' = 'github'
-                    if (flags.gitlab) platform = 'gitlab'
-                    if (flags.gitee) platform = 'gitee'
+                    // 简化：位置参数为平台名，--token 可选
+                    const validPlatforms = ['github', 'gitlab', 'gitee', 'gitcode', 'custom']
+                    let platform: SSHSetupOptions['platform'] = 'github'
+                    if (args[0] && validPlatforms.includes(args[0])) {
+                        platform = args[0] as SSHSetupOptions['platform']
+                    } else if (flags.gitcode) {
+                        platform = 'gitcode'
+                    } else if (flags.gitlab) {
+                        platform = 'gitlab'
+                    } else if (flags.gitee) {
+                        platform = 'gitee'
+                    }
 
-                    const result = await git.setupSSH(
+                    const result = await git.setupSSH({
                         platform,
-                        flags.token ? String(flags.token) : undefined
-                    )
+                        token: flags.token ? String(flags.token) : undefined
+                    })
                     if (result.success) {
                         printSuccess(result.message)
                         if (result.data) {
@@ -731,13 +742,42 @@ async function main(): Promise<void> {
                             if (d.alreadyExists) {
                                 console.log('\n\x1b[33m密钥已存在\x1b[0m')
                             }
-                            for (const step of steps) {
-                                console.log(step)
+                            if (steps) {
+                                for (const step of steps) {
+                                    console.log(step)
+                                }
                             }
                         }
                     } else {
                         printError(result.message)
                     }
+                } else if (subcommand === 'multi') {
+                    const platform = (flags.platform ? String(flags.platform) : 'gitcode') as 'github' | 'gitlab' | 'gitee' | 'gitcode'
+                    const accountsStr = flags.accounts ? String(flags.accounts) : ''
+                    if (!accountsStr) {
+                        printError('请提供 --accounts，格式: name:email,name:email')
+                        break
+                    }
+                    const accounts: SSHAccount[] = accountsStr.split(',').map((s: string) => {
+                        const [name, email] = s.trim().split(':')
+                        return { name: name.trim(), email: email.trim() }
+                    })
+                    const result = await git.setupMultiAccountSSH(platform, accounts)
+                    if (result.success) {
+                        printSuccess(result.message)
+                        if (result.data) printResult(result.data as Record<string, unknown>)
+                    } else {
+                        printError(result.message)
+                    }
+                } else if (subcommand === 'troubleshoot') {
+                    const host = flags.host ? String(flags.host) : 'git.woa.com'
+                    const result = await git.troubleshootSSH(host)
+                    if (result.success) {
+                        printSuccess(result.message)
+                    } else {
+                        printError(result.message)
+                    }
+                    if (result.data) printResult(result.data as Record<string, unknown>)
                 } else if (subcommand === 'status') {
                     const result = await git.checkSSHStatus()
                     if (result.success) {
@@ -749,8 +789,8 @@ async function main(): Promise<void> {
                         printError(result.message)
                     }
                 } else if (subcommand === 'key') {
-                    const platform = args[0] || 'github'
-                    const result = await git.showSSHKey(platform)
+                    const hostOrPlatform = args[0] || 'github'
+                    const result = await git.showSSHKey(hostOrPlatform)
                     if (result.success && result.data) {
                         const d = result.data as Record<string, unknown>
                         console.log(`\n\x1b[36mSSH 公钥 (${d.platform}):\x1b[0m`)
@@ -760,7 +800,7 @@ async function main(): Promise<void> {
                     }
                 } else {
                     printError(`未知 SSH 子命令: ${subcommand}`)
-                    console.log('可用子命令: setup, status, key')
+                    console.log('可用子命令: setup, multi, troubleshoot, status, key')
                 }
                 break
             }

@@ -39,7 +39,9 @@ import type {
     StageOptions,
     CommitOptions,
     DiffOptions,
-    LineEnding
+    LineEnding,
+    SSHSetupOptions,
+    SSHAccount
 } from './types'
 
 // ==================== Git 管理器 ====================
@@ -444,13 +446,25 @@ export class GitManager {
     // ==================== SSH 配置 ====================
 
     /** 一键配置 SSH */
-    async setupSSH(platform?: 'github' | 'gitlab' | 'gitee', token?: string): Promise<GitResult> {
-        return this.sshManager.setup(
-            platform,
-            token,
-            this.config.sshKeyType,
-            this.config.sshKeyBits
-        )
+    async setupSSH(options: SSHSetupOptions): Promise<GitResult> {
+        return this.sshManager.setup({
+            keyType: this.config.sshKeyType,
+            keyBits: this.config.sshKeyBits,
+            ...options
+        })
+    }
+
+    /** 批量配置多帐号 SSH */
+    async setupMultiAccountSSH(
+        platform: 'github' | 'gitlab' | 'gitee' | 'gitcode',
+        accounts: SSHAccount[]
+    ): Promise<GitResult> {
+        return this.sshManager.setupMultiAccount(platform, accounts)
+    }
+
+    /** 诊断 SSH 常见问题 */
+    async troubleshootSSH(host?: string): Promise<GitResult> {
+        return this.sshManager.troubleshoot(host)
     }
 
     /** 检查 SSH 状态 */
@@ -459,8 +473,8 @@ export class GitManager {
     }
 
     /** 显示 SSH 公钥 */
-    async showSSHKey(platform?: string): Promise<GitResult> {
-        return this.sshManager.showPublicKey(platform)
+    async showSSHKey(hostOrPlatform?: string): Promise<GitResult> {
+        return this.sshManager.showPublicKey(hostOrPlatform)
     }
 
     // ==================== 统计信息 ====================
@@ -508,6 +522,7 @@ export { SnapshotManager, SafetyNet } from './backup'
 export { GitOperator } from './operations'
 export { DiffViewer } from './diff'
 export { SSHManager } from './ssh'
+export { setupSSH, setupMultiAccountSSH, troubleshootSSH, checkSSHStatus, showSSHKey } from './ssh'
 export {
     gitExec,
     gitExecOrThrow,
@@ -531,7 +546,11 @@ export type {
     Snapshot,
     SnapshotStore,
     CreateSnapshotOptions,
-    RestoreSnapshotOptions
+    RestoreSnapshotOptions,
+    SSHSetupOptions,
+    SSHAccount,
+    SSHTroubleshootResult,
+    SSHTroubleshootCheck
 } from './types'
 
 export default GitManager

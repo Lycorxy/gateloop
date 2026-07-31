@@ -365,7 +365,7 @@ export class GitOperator {
      */
     async rollback(options: RollbackOptions): Promise<GitResult> {
         const startTime = Date.now()
-        const { target, force = false, mode = 'hard' } = options
+        const { target, mode = 'hard' } = options
 
         await this.preBackup('rollback', `回滚到 #${target}`)
 

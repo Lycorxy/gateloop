@@ -345,7 +345,7 @@ export interface RollbackOptions {
 /** SSH 配置 */
 export interface SSHConfig {
     /** 服务平台 */
-    platform: 'github' | 'gitlab' | 'gitee' | 'custom'
+    platform: 'github' | 'gitlab' | 'gitee' | 'gitcode' | 'custom'
     /** 主机名 */
     host: string
     /** 用户名 */
@@ -370,6 +370,69 @@ export interface SSHResult {
     nextSteps: string[]
     /** 错误信息 */
     error?: string
+}
+
+/** SSH 配置选项（增强版 v2） */
+export interface SSHSetupOptions {
+    /** 平台类型（gitcode = 腾讯工蜂 git.woa.com） */
+    platform?: 'github' | 'gitlab' | 'gitee' | 'gitcode' | 'custom'
+    /** 自定义主机名（custom 模式必填） */
+    host?: string
+    /** 端口，默认 22 */
+    port?: number
+    /** 用户名，默认 git */
+    user?: string
+    /** 密钥注释（邮箱，如 name@tencent.com） */
+    email?: string
+    /** 密钥类型，默认 ed25519 */
+    keyType?: 'rsa' | 'ed25519'
+    /** RSA 密钥位数，默认 4096 */
+    keyBits?: number
+    /** 帐号标识（多帐号用，如 personal/shared） */
+    account?: string
+    /** 自定义密钥文件名（不含路径） */
+    keyName?: string
+    /** Token（可选，用于验证） */
+    token?: string
+}
+
+/** 多帐号配置项 */
+export interface SSHAccount {
+    /** 帐号名（如 personal/shared，用于 Host 别名区分） */
+    name: string
+    /** 邮箱（密钥注释） */
+    email: string
+    /** 自定义密钥文件名（可选） */
+    keyName?: string
+}
+
+/** SSH 诊断检查项 */
+export interface SSHTroubleshootCheck {
+    /** 检查名称 */
+    name: string
+    /** 状态 */
+    status: 'pass' | 'fail' | 'warn'
+    /** 检查结果描述 */
+    message: string
+    /** 修复建议（fail/warn 时提供） */
+    fix?: string
+}
+
+/** SSH 诊断结果 */
+export interface SSHTroubleshootResult {
+    /** 目标主机 */
+    host: string
+    /** 检查项列表 */
+    checks: SSHTroubleshootCheck[]
+    /** 汇总统计 */
+    summary: {
+        /** 通过数 */
+        passed: number
+        /** 失败数 */
+        failed: number
+        /** 警告数 */
+        warnings: number
+    }
 }
 
 // ==================== 行尾符处理类型 ====================

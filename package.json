@@ -17,6 +17,11 @@
             "require": "./dist/git/index.cjs",
             "types": "./dist/git/index.d.ts"
         },
+        "./ads": {
+            "import": "./dist/ads/index.mjs",
+            "require": "./dist/ads/index.cjs",
+            "types": "./dist/ads/index.d.ts"
+        },
         "./aivn": {
             "import": "./dist/aivn/index.mjs",
             "require": "./dist/aivn/index.cjs",
@@ -29,7 +34,7 @@
     "bin": {
         "nut-lint": "./dist/lint/index.cjs",
         "nut-git": "./dist/git/index.cjs",
-        "nut-aivn": "./dist/aivn/index.cjs"
+        "nut-ads": "./dist/ads-cli/index.cjs"
     },
     "scripts": {
         "dev": "cross-env NODE_ENV=development rollup -c rollup.config.ts --watch --bundleConfigAsCjs --configPlugin typescript",

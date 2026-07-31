@@ -4,6 +4,7 @@
  * 命令行工具：规则提取、知识库生成、验证和修复
  */
 
+import { existsSync, statSync } from 'node:fs'
 import type { RuleSource, GenerateKnowledgeInput, LintInput, FixInput } from '../lint/types'
 import { extractAllRules, generateKnowledgeBase, runLint, fixLint, detectLintConfig } from '../lint'
 
@@ -114,19 +115,27 @@ async function handleKnowledge(args: string[]) {
 
 /**
  * 处理验证命令
+ *
+ * 输出格式与 ESLint 默认一致：
+ *   <文件路径>
+ *     <行号>:<列号>  <规则名>  <级别>  <消息>
+ *   ✖ N problems (M errors, W warnings)
  */
 async function handleRun(args: string[]) {
     const options = parseOptions(args)
 
-    if (!options.patterns) {
+    const patterns = getPatterns(options)
+    if (patterns.length === 0) {
         console.error('请提供文件模式，例如: nut_lint run "src/**/*.ts"')
         process.exit(1)
     }
 
+    const expanded = expandPatterns(patterns)
+
     console.log('🔎 开始验证...')
 
     const input: LintInput = {
-        patterns: options.patterns,
+        patterns: expanded,
         cwd: options.cwd,
         source: options.source as RuleSource | undefined,
         cache: options.cache !== 'false',
@@ -135,22 +144,25 @@ async function handleRun(args: string[]) {
 
     const result = await runLint(input)
 
-    console.log(`\n📊 验证结果:`)
-    console.log(`  总文件数: ${result.totalFiles}`)
-    console.log(`  成功文件: ${result.successFiles}`)
-    console.log(`  失败文件: ${result.failedFiles}`)
-    console.log(`  总问题数: ${result.totalIssues}`)
-    console.log(`  错误数: ${result.totalErrors}`)
-    console.log(`  警告数: ${result.totalWarnings}`)
-    console.log(`  可修复数: ${result.fixableIssues}`)
+    // 输出详细问题（ESLint 默认格式）
+    if (result.totalIssues > 0) {
+        for (const fileResult of result.results) {
+            if (fileResult.issues.length === 0) continue
+            console.log(`\n${fileResult.filePath}`)
+            for (const issue of fileResult.issues) {
+                const sev = issue.severity === 'error' ? 'error' : 'warning'
+                console.log(`  ${issue.line}:${issue.column}  ${issue.ruleName}  ${sev}  ${issue.message}`)
+            }
+        }
+    }
 
-    if (options.output) {
-        console.log(`\n💾 详细结果已保存到: ${options.output}`)
+    console.log(`\n✖ ${result.totalIssues} problems (${result.totalErrors} errors, ${result.totalWarnings} warnings)`)
+    if (result.fixableIssues > 0) {
+        console.log(`  ${result.fixableIssues} errors and ${result.fixableIssues} warnings potentially fixable with \`nut_lint fix\` command`)
     }
 
     console.log('\n✅ 验证完成')
 
-    // 如果有错误，退出码为 1
     if (result.totalErrors > 0) {
         process.exit(1)
     }
@@ -162,19 +174,22 @@ async function handleRun(args: string[]) {
 async function handleFix(args: string[]) {
     const options = parseOptions(args)
 
-    if (!options.patterns) {
-        console.error('请提供文件模式，例如: nut_lint fix "src/**/*.ts"')
+    const patterns = getPatterns(options)
+    if (patterns.length === 0) {
+        console.error('请提供文件模式，例如: nut_lint fix "src/**/*.ts" --write')
         process.exit(1)
     }
+
+    const expanded = expandPatterns(patterns)
 
     console.log('🔧 开始修复...')
 
     const input: FixInput = {
-        patterns: options.patterns,
+        patterns: expanded,
         cwd: options.cwd,
         source: options.source as RuleSource | undefined,
         options: {
-            write: options.write === 'true',
+            write: options.write === 'true' || options.write === undefined,
             fixAll: options.fixAll !== 'false',
             rules: options.rules?.split(',').map((r: string) => r.trim()),
             maxFixes: options.maxFixes ? parseInt(options.maxFixes) : 10,
@@ -191,39 +206,29 @@ async function handleFix(args: string[]) {
     console.log(`  修复问题数: ${result.totalFixed}`)
     console.log(`  剩余问题数: ${result.totalRemaining}`)
 
-    // 修复后自动运行验证，检查遗留问题
+    // 修复后自动验证，输出剩余问题（ESLint 默认格式）
     if (result.totalRemaining > 0 || result.failedFiles > 0) {
         console.log('\n🔄 修复后验证中...')
 
         const verifyInput: LintInput = {
-            patterns: options.patterns,
+            patterns: expanded,
             cwd: options.cwd,
             source: options.source as RuleSource | undefined
         }
         const verifyResult = await runLint(verifyInput)
 
-        console.log(`\n📊 验证结果:`)
-        console.log(`  总文件数: ${verifyResult.totalFiles}`)
-        console.log(`  成功文件: ${verifyResult.successFiles}`)
-        console.log(`  失败文件: ${verifyResult.failedFiles}`)
-        console.log(`  总问题数: ${verifyResult.totalIssues}`)
-        console.log(`  错误数: ${verifyResult.totalErrors}`)
-        console.log(`  警告数: ${verifyResult.totalWarnings}`)
-        console.log(`  可修复数: ${verifyResult.fixableIssues}`)
-
-        if (verifyResult.totalErrors > 0) {
-            console.log('\n⚠️  仍有未修复的问题，请手动修复：')
+        if (verifyResult.totalIssues > 0) {
             for (const fileResult of verifyResult.results) {
-                if (fileResult.issues.length > 0) {
-                    console.log(`\n  📄 ${fileResult.filePath}`)
-                    for (const issue of fileResult.issues) {
-                        console.log(
-                            `    ${issue.severity === 'error' ? '❌' : '⚠️'}  ${issue.ruleName}: ${issue.message} (line ${issue.line})`
-                        )
-                    }
+                if (fileResult.issues.length === 0) continue
+                console.log(`\n${fileResult.filePath}`)
+                for (const issue of fileResult.issues) {
+                    const sev = issue.severity === 'error' ? 'error' : 'warning'
+                    console.log(`  ${issue.line}:${issue.column}  ${issue.ruleName}  ${sev}  ${issue.message}`)
                 }
             }
         }
+
+        console.log(`\n✖ ${verifyResult.totalIssues} problems (${verifyResult.totalErrors} errors, ${verifyResult.totalWarnings} warnings)`)
     } else {
         console.log('\n✅ 所有问题已修复')
     }
@@ -262,24 +267,72 @@ async function handleConfig(args: string[]) {
 
 /**
  * 解析选项
+ *
+ * 支持：
+ *   --key value     → options.key = value
+ *   --flag          → options.flag = 'true'
+ *   位置参数         → options.patterns = string[]（收集所有位置参数）
  */
 function parseOptions(args: string[]): Record<string, string> {
     const options: Record<string, string> = {}
+    const patterns: string[] = []
 
     for (let i = 0; i < args.length; i++) {
         const arg = args[i]
 
         if (arg.startsWith('--')) {
             const key = arg.slice(2)
-            const value = args[i + 1]?.startsWith('--') ? 'true' : args[i + 1]
+            const next = args[i + 1]
+            // 下一个是 --xxx 或不存在 → 当前是 flag（boolean）
+            // 否则 next 是值
+            const value = (!next || next.startsWith('--')) ? 'true' : next
             options[key] = value
             if (value !== 'true') i++
-        } else if (!options.patterns) {
-            options.patterns = arg
+        } else {
+            // 位置参数 → 收集到 patterns 数组
+            patterns.push(arg)
         }
     }
 
+    if (patterns.length > 0) {
+        options.patterns = patterns.join('\n')
+    }
+
     return options
+}
+
+/**
+ * 从解析后的选项中获取 patterns 数组
+ */
+function getPatterns(options: Record<string, string>): string[] {
+    if (!options.patterns) return []
+    return options.patterns.split('\n').filter(Boolean)
+}
+
+/**
+ * 展开目录为 glob 模式
+ *
+ * 裸目录自动追加递归通配符 + 文件扩展名
+ * 已有通配符（星号或问号）的模式原样返回
+ */
+function expandPatterns(patterns: string[]): string[] {
+    const extensions = '{js,ts,jsx,tsx,vue,scss,css}'
+
+    return patterns.map((p) => {
+        // 已有通配符 → 原样返回
+        if (p.includes('*') || p.includes('?')) return p
+
+        // 检查是否是目录
+        try {
+            if (existsSync(p) && statSync(p).isDirectory()) {
+                return `${p}/**/*.${extensions}`
+            }
+        } catch {
+            // 路径不可访问，原样返回
+        }
+
+        return p
+    })
 }
 
 /**
@@ -290,7 +343,7 @@ function printHelp() {
 🔧 Lint 工具 - 命令行接口
 
 用法:
-  nut_lint <命令> [选项]
+  nut_lint <命令> [选项] <patterns...>
 
 命令:
   extract     提取 ESLint 和 Stylelint 规则
@@ -302,10 +355,22 @@ function printHelp() {
 选项:
   --cwd <path>        工作目录
   --source <source>   规则来源 (eslint/stylelint)
-  --patterns <glob>   文件模式
-  --write             写入文件
+  --write             写入文件（fix 命令）
   --verbose           显示详细信息
-  --help, -h         显示帮助信息
+  --help, -h          显示帮助信息
+
+patterns:
+  支持单文件、多文件、目录、glob 模式或混合：
+  单文件:    src/index.ts
+  多文件:    src/index.ts src/types.ts
+  目录:      src/helpers（自动展开为 src/helpers/**/*.{js,ts,...}）
+  glob:      "src/**/*.ts"
+  混合:      src/components/Button.tsx src/hooks
+
+输出格式（与 ESLint 默认一致）:
+  <文件路径>
+    <行号>:<列号>  <规则名>  <级别>  <消息>
+  ✖ N problems (M errors, W warnings)
 
 示例:
   # 提取所有规则
@@ -314,11 +379,21 @@ function printHelp() {
   # 生成知识库
   nut_lint knowledge --source eslint
 
-  # 验证文件
+  # 验证单文件
+  nut_lint run src/index.ts
+
+  # 验证多文件
+  nut_lint run src/index.ts src/types.ts
+
+  # 验证目录
+  nut_lint run src/helpers
+
+  # 验证 glob
   nut_lint run "src/**/*.ts"
 
   # 修复错误
-  nut_lint fix "src/**/*.ts" --write
+  nut_lint fix src/index.ts --write
+  nut_lint fix src/helpers --write
 `)
 }
 

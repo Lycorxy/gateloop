@@ -355,7 +355,7 @@ export async function runTypeScript(
     const args = hasTsconfig ? ['--project', tsconfigPath] : []
 
     try {
-        const result = await exec(tscInfo.command, [...tscInfo.prependArgs, '--noEmit', '--pretty', 'false', ...args], {
+        await exec(tscInfo.command, [...tscInfo.prependArgs, '--noEmit', '--pretty', 'false', ...args], {
             cwd: config.rootDir,
             timeout: 120000  // tsc 可能较慢
         })

@@ -17,7 +17,7 @@ import type {
     BatchFormatResult,
     ProjectFormatConfig
 } from './types'
-import { EXT_TO_PARSER, ESLINT_EXTENSIONS, PRETTIER_EXTENSIONS } from './types'
+import { ESLINT_EXTENSIONS, PRETTIER_EXTENSIONS } from './types'
 
 // ==================== 配置检测 ====================
 
@@ -139,14 +139,6 @@ async function getExecutable(rootDir: string, name: string): Promise<string | nu
     }
 
     return null
-}
-
-/**
- * 获取文件的 Prettier 解析器
- */
-function getParser(filePath: string): string | undefined {
-    const ext = extname(filePath).toLowerCase()
-    return EXT_TO_PARSER[ext]
 }
 
 /**

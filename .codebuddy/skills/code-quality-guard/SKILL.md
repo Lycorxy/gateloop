@@ -171,22 +171,48 @@ read_file('.codebuddy/skills/code-quality-guard/references/quick-ref.md')
 ### 3.1 自动修复（先跑修复，再验证）
 
 ```bash
-# 单文件
-npx nut-lint fix <file_path> --write
-# 批量
-npx nut-lint fix "src/**/*.ts" --wrap
+# <target> = 单文件 | 多文件(空格分隔) | 目录 | glob | 混合
+npx nut-lint fix <target> --write
+# 示例：
+#   npx nut-lint fix src/components/Button.tsx --write
+#   npx nut-lint fix src/utils src/hooks/use-form.ts --write
+#   npx nut-lint fix "src/**/*.ts" --write
 # 仅 Prettier 格式化
-npx nut-lint format <file_or_pattern>
+npx nut-lint format <target>
 ```
 
 `fix --write` 同时执行：Prettier 格式化 → ESLint 修复 → Stylelint 修复。
+⚠️ 禁止添加 shell 重定向（如 `2>&1`、`&1`），直接执行命令即可。
 
 ### 3.2 验证
 
 ```bash
-npx nut-lint run <file_path>
+# <target> = 单文件 | 多文件(空格分隔) | 目录 | glob | 混合
+npx nut-lint run <target>
 # 同时运行 Prettier + ESLint + Stylelint + tsc --noEmit
+# 示例：
+#   npx nut-lint run src/components/Button.tsx
+#   npx nut-lint run src/utils src/hooks
+#   npx nut-lint run "src/**/*.{ts,tsx}"
 ```
+
+⚠️ 禁止添加 shell 重定向（如 `2>&1`、`&1`），直接执行命令即可。
+
+**输出格式（与 ESLint 默认一致，直接读取即可）：**
+```
+<文件路径>
+  <行号>:<列号>  <规则名>  <严重级别>  <消息>
+✖ N problems (M errors, W warnings)
+```
+示例：
+```
+src/components/Button.tsx
+  12:3   no-unused-vars  error  'unused' is defined but never used
+  25:1   eqeqeq           error  Expected '===' and instead saw '=='
+  8:10   prefer-const     warning  'x' is never reassigned. Use 'const'
+✖ 3 problems (2 errors, 1 warning)
+```
+逐条读取 `{文件路径} {行号}:{列号} {规则名} {消息}`，按 3.3 错误分类处理。
 
 ### 3.3 分析驱动修复（强制·禁止盲目循环跑fix）
 
@@ -265,10 +291,14 @@ TS2304(缺少导入) → TS2345/TS2322(参数类型) → TS2532(undefined) → T
 | `npx nut-lint extract --verbose` | 提取项目规则 | 任务1 |
 | `npx nut-lint extract --check` | 检测规则变更 | 任务1 |
 | `npx nut-lint knowledge --source {eslint/stylelint} --rules all --overwrite true --outputDir {dir}` | 生成规则知识库 | 任务1 |
-| `npx nut-lint fix <file> --write` | Prettier+ESLint+Stylelint 自动修复 | 任务3 |
-| `npx nut-lint format <file>` | 仅 Prettier 格式化 | 任务3 |
-| `npx nut-lint run <file>` | 验证(Prettier+ESLint+Stylelint+tsc) | 任务3 |
-| `npx nut-lint check <file>` | 仅检查不修复 | 任务3 |
+| `npx nut-lint fix <target> --write` | Prettier+ESLint+Stylelint 自动修复 | 任务3 |
+| `npx nut-lint format <target>` | 仅 Prettier 格式化 | 任务3 |
+| `npx nut-lint run <target>` | 验证(Prettier+ESLint+Stylelint+tsc) | 任务3 |
+| `npx nut-lint check <target>` | 仅检查不修复 | 任务3 |
+
+> `<target>` = 单文件 \| 多文件(空格分隔) \| 目录 \| glob 模式 \| 混合。
+> 输出格式与 ESLint 默认一致：`文件路径 → 行:列 规则名 级别 消息`。
+> 禁止添加 `2>&1` 等 shell 重定向，直接执行命令。
 | `npx nut-lint config` | 诊断项目配置 | 故障排除 |
 
 ---
