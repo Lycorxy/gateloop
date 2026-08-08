@@ -21,15 +21,24 @@ trigger-keywords:
     - 模块化设计
 
 # ── 依赖关系 ──
-depends-on: [specflow-rules-engine]
-mutual-exclude: [admin-ui-design, frontend-codegen]
+# v6: 去掉 specflow-rules-engine，规则由 ADS reads + rulesInline 内联
+# 被 frontend-codegen anchor "design" 调用时，RULE.mdc 由引擎读取后内联进指令
+depends-on: []
+mutual-exclude: [admin-ui-design]
 require-tools:
-    [read_file, grep_search, codebase_search, search_files, list_dir, use_skill, use_mcp_tool]
+    [read_file, search_content, search_file, list_dir, RAG_search]
 
 # ── 生命周期 ──
 load-strategy: lazy
 unload-after-run: true
 max-duration: 360
+
+# ── ADS Harness 集成 ──
+# 本 skill 是 frontend-codegen ADS harness 的 design anchor 子 skill
+# 规则注入：ADS reads → RULE.mdc → rulesInline 内联进指令 JSON
+# 门禁验证：ADS verify → schema 校验 frontendPlan 4 张表
+# 状态管理：ADS anchor-state.json（design 阶段状态由引擎管理）
+# 断线恢复：nut ads status 随时查看当前进度
 
 # ── 触发权重 ──
 trigger-weight:

@@ -1,0 +1,24 @@
+{
+  "_role": "本 manifest 供独立调用（单独跑 lint-fix 任务）。被 frontend-codegen 调用时，本 skill 的 RULE.mdc 由 frontend-codegen 的 code anchor reads 内联，不重复跑此 manifest。",
+  "name": "code-quality-guard",
+  "description": "代码质量管控 ADS harness — 规则提取→注入→验证修复闭环（独立调用入口）",
+  "scratchDir": ".codebuddy/scratch",
+  "scratchGcHours": 72,
+  "maxAttempts": 5,
+  "anchors": [
+    {
+      "id": "lint-fix",
+      "name": "规则提取 + 验证修复闭环",
+      "brief": "前置：检测 references/references/ 是否就绪（不存在则 npx nut lint extract + knowledge 生成）。然后注入规则（read quick-ref.md）。最后 npx nut lint fix --write → npx nut lint run 循环到 0 错误。引擎强制重跑 tsc+lint，exit 0 才推进。圈复杂度 11-13 允许 // @complexity-justified: 注释声明例外。5 轮后输出"不可自动修复报告"。规则已由引擎内联（rulesInline）。",
+      "reads": [
+        ".codebuddy/skills/code-quality-guard/RULE.mdc"
+      ],
+      "produces": [],
+      "verify": {
+        "tsc": true,
+        "lint": true,
+        "producesFresh": false
+      }
+    }
+  ]
+}

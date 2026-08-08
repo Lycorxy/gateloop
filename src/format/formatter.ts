@@ -1,15 +1,11 @@
 /**
  * 代码格式化器
  *
- * 独立的格式化模块，支持：
- * - Prettier 格式化
- * - ESLint 格式化
- * - 自动检测项目配置
+ * 独立的格式化模块，支持 Prettier/ESLint 格式化和自动检测项目配置
  */
 
 import { join, extname, resolve } from 'node:path'
-import { exec } from '../helpers'
-import { exists, readText, writeText } from '../helpers'
+import { exec, exists, readText, writeText } from '../helpers'
 import type {
     FormatterType,
     FormatOptions,
@@ -19,9 +15,8 @@ import type {
 } from './types'
 import { ESLINT_EXTENSIONS, PRETTIER_EXTENSIONS } from './types'
 
-// ==================== 配置检测 ====================
+// ==================== 配置常量 ====================
 
-/** ESLint 配置文件 */
 const ESLINT_CONFIG_FILES = [
     'eslint.config.js',
     'eslint.config.mjs',
@@ -35,7 +30,6 @@ const ESLINT_CONFIG_FILES = [
     '.eslintrc'
 ]
 
-/** Prettier 配置文件 */
 const PRETTIER_CONFIG_FILES = [
     'prettier.config.js',
     'prettier.config.cjs',
@@ -51,66 +45,38 @@ const PRETTIER_CONFIG_FILES = [
     '.prettierrc.toml'
 ]
 
-/**
- * 查找配置文件
- */
+// ==================== 配置检测 ====================
+
 async function findConfigFile(rootDir: string, configFiles: string[]): Promise<string | undefined> {
     for (const configFile of configFiles) {
         const configPath = join(rootDir, configFile)
-        if (await exists(configPath)) {
-            return configPath
-        }
+        if (await exists(configPath)) return configPath
     }
     return undefined
 }
 
-/**
- * 查找项目根目录
- */
 async function findProjectRoot(startPath?: string): Promise<string> {
     let currentDir = startPath || process.cwd()
-
     while (currentDir !== resolve('/')) {
-        const packagePath = join(currentDir, 'package.json')
-        if (await exists(packagePath)) {
-            return currentDir
-        }
-
+        if (await exists(join(currentDir, 'package.json'))) return currentDir
         const parentDir = resolve(currentDir, '..')
         if (parentDir === currentDir) break
         currentDir = parentDir
     }
-
     return startPath || process.cwd()
 }
 
-/**
- * 检测项目格式化配置
- */
 export async function detectFormatConfig(startPath?: string): Promise<ProjectFormatConfig> {
     const rootDir = await findProjectRoot(startPath)
-
     const eslintConfigPath = await findConfigFile(rootDir, ESLINT_CONFIG_FILES)
     const prettierConfigPath = await findConfigFile(rootDir, PRETTIER_CONFIG_FILES)
-
     const hasEslint = !!eslintConfigPath
     const hasPrettier = !!prettierConfigPath
 
     let recommendedFormatter: FormatterType = 'none'
-    if (hasEslint && hasPrettier) {
-        recommendedFormatter = 'both'
-    } else if (hasPrettier) {
-        recommendedFormatter = 'prettier'
-    } else if (hasEslint) {
-        recommendedFormatter = 'eslint'
-    }
-
-    const eslintIgnorePath = (await exists(join(rootDir, '.eslintignore')))
-        ? join(rootDir, '.eslintignore')
-        : undefined
-    const prettierIgnorePath = (await exists(join(rootDir, '.prettierignore')))
-        ? join(rootDir, '.prettierignore')
-        : undefined
+    if (hasEslint && hasPrettier) recommendedFormatter = 'both'
+    else if (hasPrettier) recommendedFormatter = 'prettier'
+    else if (hasEslint) recommendedFormatter = 'eslint'
 
     return {
         rootDir,
@@ -119,49 +85,34 @@ export async function detectFormatConfig(startPath?: string): Promise<ProjectFor
         recommendedFormatter,
         eslintConfigPath,
         prettierConfigPath,
-        eslintIgnorePath,
-        prettierIgnorePath
+        eslintIgnorePath: (await exists(join(rootDir, '.eslintignore')))
+            ? join(rootDir, '.eslintignore')
+            : undefined,
+        prettierIgnorePath: (await exists(join(rootDir, '.prettierignore')))
+            ? join(rootDir, '.prettierignore')
+            : undefined
     }
 }
 
-// ==================== 工具检测 ====================
+// ==================== 工具函数 ====================
 
-/**
- * 获取可执行文件路径
- */
 async function getExecutable(rootDir: string, name: string): Promise<string | null> {
     const binPath = join(rootDir, 'node_modules', '.bin')
     const execName = process.platform === 'win32' ? `${name}.cmd` : name
     const execPath = join(binPath, execName)
-
-    if (await exists(execPath)) {
-        return execPath
-    }
-
-    return null
+    return (await exists(execPath)) ? execPath : null
 }
 
-/**
- * 检查文件是否被 ESLint 支持
- */
 function isEslintSupported(filePath: string): boolean {
-    const ext = extname(filePath).toLowerCase()
-    return ESLINT_EXTENSIONS.includes(ext)
+    return ESLINT_EXTENSIONS.includes(extname(filePath).toLowerCase())
 }
 
-/**
- * 检查文件是否被 Prettier 支持
- */
 function isPrettierSupported(filePath: string): boolean {
-    const ext = extname(filePath).toLowerCase()
-    return PRETTIER_EXTENSIONS.includes(ext)
+    return PRETTIER_EXTENSIONS.includes(extname(filePath).toLowerCase())
 }
 
 // ==================== Prettier 格式化 ====================
 
-/**
- * 使用 Prettier 格式化文件
- */
 async function formatFileWithPrettier(
     filePath: string,
     config: ProjectFormatConfig,
@@ -187,28 +138,17 @@ async function formatFileWithPrettier(
     try {
         const originalContent = await readText(filePath)
         const args: string[] = []
-
-        if (config.prettierConfigPath) {
-            args.push('--config', config.prettierConfigPath)
-        }
-
-        if (options.write) {
-            args.push('--write')
-        }
-
+        if (config.prettierConfigPath) args.push('--config', config.prettierConfigPath)
+        if (options.write) args.push('--write')
         args.push(resolve(filePath))
 
-        await exec(prettierPath, args, {
-            cwd: config.rootDir,
-            timeout: 30000
-        })
+        await exec(prettierPath, args, { cwd: config.rootDir, timeout: 30000 })
 
         if (options.write) {
             const newContent = await readText(filePath)
             result.formatted = newContent
             result.changed = originalContent !== newContent
         } else {
-            // prettier 输出格式化内容到 stdout
             result.formatted = originalContent
         }
     } catch (error) {
@@ -221,9 +161,6 @@ async function formatFileWithPrettier(
 
 // ==================== ESLint 格式化 ====================
 
-/**
- * 使用 ESLint 格式化文件
- */
 async function formatFileWithEslint(
     filePath: string,
     config: ProjectFormatConfig,
@@ -249,17 +186,10 @@ async function formatFileWithEslint(
     try {
         const originalContent = await readText(filePath)
         const args = ['--fix']
-
-        if (config.eslintConfigPath) {
-            args.push('--config', config.eslintConfigPath)
-        }
-
+        if (config.eslintConfigPath) args.push('--config', config.eslintConfigPath)
         args.push(resolve(filePath))
 
-        await exec(eslintPath, args, {
-            cwd: config.rootDir,
-            timeout: 30000
-        })
+        await exec(eslintPath, args, { cwd: config.rootDir, timeout: 30000 })
 
         const newContent = await readText(filePath)
         result.formatted = newContent
@@ -279,37 +209,22 @@ async function formatFileWithEslint(
 
 // ==================== 综合格式化 ====================
 
-/**
- * 确定使用的格式化工具
- */
 function determineFormatter(
     filePath: string,
     config: ProjectFormatConfig,
     preferredFormatter?: FormatterType
 ): FormatterType {
-    if (preferredFormatter && preferredFormatter !== 'none') {
-        return preferredFormatter
-    }
+    if (preferredFormatter && preferredFormatter !== 'none') return preferredFormatter
 
     const supportsEslint = isEslintSupported(filePath)
     const supportsPrettier = isPrettierSupported(filePath)
 
     if (config.recommendedFormatter === 'both') {
-        if (supportsEslint && supportsPrettier) {
-            return 'both'
-        }
-        if (supportsEslint) {
-            return 'eslint'
-        }
-        if (supportsPrettier) {
-            return 'prettier'
-        }
+        return resolveBothFormatter(supportsEslint, supportsPrettier)
     }
-
     if (config.recommendedFormatter === 'eslint') {
         return supportsEslint ? 'eslint' : 'none'
     }
-
     if (config.recommendedFormatter === 'prettier') {
         return supportsPrettier ? 'prettier' : 'none'
     }
@@ -317,9 +232,13 @@ function determineFormatter(
     return 'none'
 }
 
-/**
- * 格式化单个文件
- */
+function resolveBothFormatter(supportsEslint: boolean, supportsPrettier: boolean): FormatterType {
+    if (supportsEslint && supportsPrettier) return 'both'
+    if (supportsEslint) return 'eslint'
+    if (supportsPrettier) return 'prettier'
+    return 'none'
+}
+
 export async function formatFile(
     filePath: string,
     cwd?: string,
@@ -331,16 +250,10 @@ export async function formatFile(
     switch (formatter) {
         case 'eslint':
             return formatFileWithEslint(filePath, config, options)
-
         case 'prettier':
             return formatFileWithPrettier(filePath, config, options)
-
         case 'both': {
-            let result = await formatFileWithPrettier(filePath, config, {
-                ...options,
-                write: true
-            })
-
+            let result = await formatFileWithPrettier(filePath, config, { ...options, write: true })
             if (result.errors.length === 0 && isEslintSupported(filePath)) {
                 const eslintResult = await formatFileWithEslint(filePath, config, options)
                 result = {
@@ -350,10 +263,8 @@ export async function formatFile(
                     duration: result.duration + eslintResult.duration
                 }
             }
-
             return result
         }
-
         default:
             return {
                 formatted: await readText(filePath),
@@ -366,9 +277,6 @@ export async function formatFile(
     }
 }
 
-/**
- * 批量格式化文件
- */
 export async function formatFiles(
     files: string[],
     cwd?: string,
@@ -376,7 +284,6 @@ export async function formatFiles(
 ): Promise<BatchFormatResult> {
     const startTime = Date.now()
     const results: Array<{ filePath: string; result: FormatResult }> = []
-
     let success = 0
     let failed = 0
     let changed = 0
@@ -396,16 +303,9 @@ export async function formatFiles(
 
         for (const { result } of batchResults) {
             results.push(result as unknown as { filePath: string; result: FormatResult })
-
-            if (result.errors.length === 0) {
-                success++
-            } else {
-                failed++
-            }
-
-            if (result.changed) {
-                changed++
-            }
+            if (result.errors.length === 0) success++
+            else failed++
+            if (result.changed) changed++
         }
     }
 

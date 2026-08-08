@@ -1,0 +1,116 @@
+{
+  "name": "figma-dom-style",
+  "description": "Figma 设计稿全流程还原 ADS harness — 获取材料→布局分析→渐进实现→交付验证。ADS 引擎接管状态机（替代 harness.mjs 803行），schema+custom+review 三层门禁。内部策略级联(A→B→C)/局部验证/快照回退由模型执行（RULE.mdc 铁律约束）。",
+  "scratchDir": ".specflow/scratch",
+  "scratchGcHours": 72,
+  "maxAttempts": 5,
+  "anchors": [
+    {
+      "id": "materials",
+      "name": "获取基准材料（Step 1）",
+      "brief": "MCP 三并行获取材料：figma_baseline_compare(origin-dsl.json) + figma_to_html(baseline.html) + calc_spacing(spacing-report.json)。模型调 MCP 产出文件，引擎校验存在+新鲜。铁律1a/1（spacing-report/文字颜色）已由 reads 内联。",
+      "reads": [".codebuddy/skills/figma-dom-style/RULE.mdc"],
+      "produces": [
+        ".specflow/context/origin-dsl.json",
+        ".specflow/context/spacing-report.json",
+        ".specflow/context/baseline.html"
+      ],
+      "emits": ["materials"],
+      "verify": {
+        "producesExist": true,
+        "producesFresh": true
+      }
+    },
+    {
+      "id": "layout",
+      "name": "布局分析（Step 2）",
+      "brief": "分析 DSL+spacing → layout-plan.json（骨架+布局决策+盒模型+文字颜色）+ task-queue.json（标注驱动任务拆分）。引擎 schema 校验 layout-plan 完备性。task-queue.json 作为领域产物由模型维护（策略级联/局部验证用），ADS SubTask 管推进门禁。",
+      "consumes": ["materials"],
+      "produces": [".specflow/context/layout-plan.json"],
+      "emits": ["layoutPlan"],
+      "verify": {
+        "schema": {
+          "type": "object",
+          "required": ["skeleton", "layoutDecisions", "boxModel"],
+          "properties": {
+            "skeleton": {
+              "type": "object",
+              "required": ["layout", "regions"]
+            },
+            "layoutDecisions": { "type": "array" },
+            "boxModel": { "type": "object" }
+          }
+        },
+        "producesFresh": true,
+        "custom": [
+          "node .codebuddy/skills/figma-dom-style/scripts/check-figma-accuracy.mjs --anchor layout"
+        ]
+      }
+    },
+    {
+      "id": "reduce",
+      "name": "渐进实现+差异修复（Step 3-4）",
+      "brief": "骨架(3a)→区域逐个实现+验证(3b)→整合全量检测(3c)+差异修复(Step4)。requiresSubtasks 强制任务队列（task-queue.json 的 Task 映射为 ADS SubTask，全完成才推进）。内部策略级联(A纯flex→B混合→C基线复用)/局部验证(Task bounds diff)/快照回退/无效迭代检测由模型执行（RULE.mdc 铁律3a/6a/10-14）。产出 iter-final.html。引擎校验产物存在+新鲜。",
+      "consumes": ["layoutPlan"],
+      "requiresSubtasks": true,
+      "maxAttempts": 8,
+      "produces": [".specflow/context/iter-final.html"],
+      "emits": ["reducedHtml"],
+      "verify": {
+        "producesExist": true,
+        "producesFresh": true,
+        "custom": [
+          "node .codebuddy/skills/figma-dom-style/scripts/check-figma-accuracy.mjs --anchor reduce"
+        ]
+      }
+    },
+    {
+      "id": "deliver",
+      "name": "交付验证（Step 5）",
+      "brief": "还原质量 review 6 项主观评审。模型跑 MCP(figma_compare_html_file) 得 similarity 写入 reduce-review.json.meta，引擎 review 四道门禁卡还原质量（absolute转换/盒模型精度/布局语义/文字颜色/冗余过滤/结构保真）。similarity≥95% 由铁律强制 + review evidence 体现。",
+      "consumes": ["layoutPlan", "reducedHtml"],
+      "produces": [".specflow/context/reduce-review.json"],
+      "verify": {
+        "custom": [
+          "node .codebuddy/skills/figma-dom-style/scripts/check-figma-accuracy.mjs --anchor deliver"
+        ],
+        "review": {
+          "output": ".specflow/context/reduce-review.json",
+          "requireEvidence": true,
+          "checklist": [
+            {
+              "id": "absolute-conversion",
+              "rule": "absolute 转换合理：非例外 absolute 已转 flex/grid（铁律3a/3b），保留项属4种例外（高亮叠层/decorator/图标偏移/Switch圆点）",
+              "mode": "model"
+            },
+            {
+              "id": "box-model-precision",
+              "rule": "盒模型精度：box-sizing/padding/border 从 spacing-report.json 精确读取非目测（铁律1a/3c），有 border 的元素显式 box-sizing:border-box",
+              "mode": "model"
+            },
+            {
+              "id": "layout-semantics",
+              "rule": "布局语义化：策略A(纯flex/grid)优先，策略C(基线复用)仅用于无法语义化场景，非为降 diff 滥用基线",
+              "mode": "model"
+            },
+            {
+              "id": "text-color-precision",
+              "rule": "文字颜色逐节点：从 DSL style.fill 精确提取，同容器不同色用 class 分别设置（铁律1），禁止继承色替代",
+              "mode": "model"
+            },
+            {
+              "id": "redundant-filter",
+              "rule": "冗余元素过滤正确：堆叠统计Switch/重复indicator/placeholder 已过滤（铁律6b），非误删真实元素",
+              "mode": "model"
+            },
+            {
+              "id": "structure-fidelity",
+              "rule": "结构保真：Switch三层嵌套（底板+track+dot）/叠加兄弟归并(nest-into-sibling)/被遮挡元素过滤正确（铁律3d/6b/z_index方向）",
+              "mode": "model"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

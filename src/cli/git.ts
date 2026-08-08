@@ -4,34 +4,34 @@
  * 命令行工具：Git 操作封装，包括暂存、提交、回滚、备份、差异、SSH
  *
  * 使用方式：
- *   nut-git status              - 查看工作区状态
- *   nut-git stage --all         - 暂存所有文件
- *   nut-git stage --files "a.ts,b.ts"  - 暂存指定文件
- *   nut-git stage --fix-lf      - 暂存并修复换行符
- *   nut-git unstage             - 取消暂存
- *   nut-git commit -m "msg"     - 提交
- *   nut-git log                 - 查看提交日志
- *   nut-git snapshots           - 查看快照列表
- *   nut-git snapshot -d "备份"   - 创建快照
- *   nut-git rollback --to 0     - 回退到指定快照
- *   nut-git rollback --prev     - 回退到上一个快照
- *   nut-git rollback --first    - 回退到第一个快照
- *   nut-git diff                - 查看工作区差异
- *   nut-git diff --staged       - 查看暂存区差异
- *   nut-git diff-file <path>    - 查看文件差异
- *   nut-git diff-branch <a> <b> - 分支对比
- *   nut-git history <path>      - 文件历史
- *   nut-git branch              - 分支列表
- *   nut-git branch -c <name>    - 创建分支
- *   nut-git checkout <name>     - 切换分支
- *   nut-git stash               - 暂存工作区
- *   nut-git stash-pop           - 恢复工作区
- *   nut-git lf                  - 检测换行符
- *   nut-git lf --fix            - 修复换行符
- *   nut-git lf --setup          - 配置 .gitattributes
- *   nut-git ssh setup           - 一键配置 SSH
- *   nut-git ssh status          - 查看 SSH 状态
- *   nut-git ssh key             - 查看公钥
+ *   nut git status              - 查看工作区状态
+ *   nut git stage --all         - 暂存所有文件
+ *   nut git stage --files "a.ts,b.ts"  - 暂存指定文件
+ *   nut git stage --fix-lf      - 暂存并修复换行符
+ *   nut git unstage             - 取消暂存
+ *   nut git commit -m "msg"     - 提交
+ *   nut git log                 - 查看提交日志
+ *   nut git snapshots           - 查看快照列表
+ *   nut git snapshot -d "备份"   - 创建快照
+ *   nut git rollback --to 0     - 回退到指定快照
+ *   nut git rollback --prev     - 回退到上一个快照
+ *   nut git rollback --first    - 回退到第一个快照
+ *   nut git diff                - 查看工作区差异
+ *   nut git diff --staged       - 查看暂存区差异
+ *   nut git diff-file <path>    - 查看文件差异
+ *   nut git diff-branch <a> <b> - 分支对比
+ *   nut git history <path>      - 文件历史
+ *   nut git branch              - 分支列表
+ *   nut git branch -c <name>    - 创建分支
+ *   nut git checkout <name>     - 切换分支
+ *   nut git stash               - 暂存工作区
+ *   nut git stash-pop           - 恢复工作区
+ *   nut git lf                  - 检测换行符
+ *   nut git lf --fix            - 修复换行符
+ *   nut git lf --setup          - 配置 .gitattributes
+ *   nut git ssh setup           - 一键配置 SSH
+ *   nut git ssh status          - 查看 SSH 状态
+ *   nut git ssh key             - 查看公钥
  */
 
 import { GitManager } from '../git/index'
@@ -115,79 +115,79 @@ function printHelp(): void {
 ╚══════════════════════════════════════════════════════════════╝
 
 📋 基本操作:
-  nut-git status              查看工作区状态
-  nut-git log [-n <数量>]     查看提交日志
+  nut git status              查看工作区状态
+  nut git log [-n <数量>]     查看提交日志
 
 📦 暂存与提交:
-  nut-git stage --all         暂存所有文件
-  nut-git stage --files <列表> 暂存指定文件 (逗号分隔)
-  nut-git stage --fix-lf      暂存并自动修复换行符
-  nut-git unstage [文件...]    取消暂存
-  nut-git commit -m <消息>    提交代码
-  nut-git commit -m <消息> --amend   修改上一次提交
+  nut git stage --all         暂存所有文件
+  nut git stage --files <列表> 暂存指定文件 (逗号分隔)
+  nut git stage --fix-lf      暂存并自动修复换行符
+  nut git unstage [文件...]    取消暂存
+  nut git commit -m <消息>    提交代码
+  nut git commit -m <消息> --amend   修改上一次提交
 
 ⏪ 回退与快照:
-  nut-git snapshots           列出所有快照
-  nut-git snapshot -d <描述>  创建手动快照
-  nut-git rollback --to <索引>  回退到指定快照
-  nut-git rollback --prev     回退到上一个快照
-  nut-git rollback --first    回退到第一个快照
-  nut-git revert <文件>       还原单个文件
+  nut git snapshots           列出所有快照
+  nut git snapshot -d <描述>  创建手动快照
+  nut git rollback --to <索引>  回退到指定快照
+  nut git rollback --prev     回退到上一个快照
+  nut git rollback --first    回退到第一个快照
+  nut git revert <文件>       还原单个文件
 
 🔍 差异与历史:
-  nut-git diff                查看工作区差异
-  nut-git diff --staged       查看暂存区差异
-  nut-git diff-file <路径>    查看文件差异
-  nut-git diff-branch <A> <B> 比较两个分支
-  nut-git history <路径>      查看文件历史
+  nut git diff                查看工作区差异
+  nut git diff --staged       查看暂存区差异
+  nut git diff-file <路径>    查看文件差异
+  nut git diff-branch <A> <B> 比较两个分支
+  nut git history <路径>      查看文件历史
 
 🌿 分支管理:
-  nut-git branch              列出本地分支
-  nut-git branch -a           列出所有分支(含远程)
-  nut-git branch -c <名称>    创建并切换分支
-  nut-git checkout <名称>     切换分支
-  nut-git branch -d <名称>    删除分支
-  nut-git branch -D <名称>    强制删除分支
+  nut git branch              列出本地分支
+  nut git branch -a           列出所有分支(含远程)
+  nut git branch -c <名称>    创建并切换分支
+  nut git checkout <名称>     切换分支
+  nut git branch -d <名称>    删除分支
+  nut git branch -D <名称>    强制删除分支
 
 📎 Stash:
-  nut-git stash [描述]        暂存工作区
-  nut-git stash-pop           恢复工作区
-  nut-git stash-list          查看 Stash 列表
+  nut git stash [描述]        暂存工作区
+  nut git stash-pop           恢复工作区
+  nut git stash-list          查看 Stash 列表
 
 📝 换行符:
-  nut-git lf                  检测换行符状态
-  nut-git lf --fix            修复换行符为 LF
-  nut-git lf --crlf --fix     修复换行符为 CRLF
-  nut-git lf --setup          配置 .gitattributes
+  nut git lf                  检测换行符状态
+  nut git lf --fix            修复换行符为 LF
+  nut git lf --crlf --fix     修复换行符为 CRLF
+  nut git lf --setup          配置 .gitattributes
 
 🔑 SSH 配置:
-  nut-git ssh setup [platform]              一键配置 SSH（github/gitlab/gitee/gitcode，默认 github）
-  nut-git ssh setup gitcode                 配置腾讯工蜂
-  nut-git ssh setup gitcode --token xxx     带 token
-  nut-git ssh multi --platform gitcode --accounts "personal:email,shared:email"
-  nut-git ssh troubleshoot                 诊断 SSH 问题
-  nut-git ssh status                        查看 SSH 状态
-  nut-git ssh key [host]                    查看公钥
+  nut git ssh setup [platform]              一键配置 SSH（github/gitlab/gitee/gitcode，默认 github）
+  nut git ssh setup gitcode                 配置腾讯工蜂
+  nut git ssh setup gitcode --token xxx     带 token
+  nut git ssh multi --platform gitcode --accounts "personal:email,shared:email"
+  nut git ssh troubleshoot                 诊断 SSH 问题
+  nut git ssh status                        查看 SSH 状态
+  nut git ssh key [host]                    查看公钥
 
 示例:
-  nut-git stage --all
-  nut-git commit -m "feat: 添加新功能"
-  nut-git snapshot -d "发布前备份" --tag release
-  nut-git rollback --to 3
-  nut-git diff-branch main develop
+  nut git stage --all
+  nut git commit -m "feat: 添加新功能"
+  nut git snapshot -d "发布前备份" --tag release
+  nut git rollback --to 3
+  nut git diff-branch main develop
 `)
 }
 
 // ==================== 命令解析 ====================
 
 /** 简单参数解析（不依赖 commander） */
-function parseArgs(argv: string[]): {
+function parseArgs(args: string[]): {
     command: string
     subcommand: string
     args: string[]
     flags: Record<string, string | boolean>
 } {
-    const all = argv.slice(2)
+    const all = args
     const flags: Record<string, string | boolean> = {}
     const positional: string[] = []
     let command = ''
@@ -236,8 +236,8 @@ function parseArgs(argv: string[]): {
 
 // ==================== 主函数 ====================
 
-async function main(): Promise<void> {
-    const { command, subcommand, args, flags } = parseArgs(process.argv)
+export async function runGit(argv: string[]): Promise<void> {
+    const { command, subcommand, args, flags } = parseArgs(argv)
 
     if (!command || flags.help) {
         printHelp()
@@ -485,9 +485,9 @@ async function main(): Promise<void> {
                                 `  [#${snap.index}] ${snap.description} (${snap.operation})`
                             )
                         }
-                        console.log('\n使用 nut-git rollback --to <索引> 回退到指定快照')
-                        console.log('使用 nut-git rollback --prev 回退到上一个快照')
-                        console.log('使用 nut-git rollback --first 回退到初始快照')
+                        console.log('\n使用 nut git rollback --to <索引> 回退到指定快照')
+                        console.log('使用 nut git rollback --prev 回退到上一个快照')
+                        console.log('使用 nut git rollback --first 回退到初始快照')
                     }
                 }
                 break
@@ -535,7 +535,7 @@ async function main(): Promise<void> {
             case 'diff-branch':
             case 'diff-branches': {
                 if (args.length < 2) {
-                    printError('请提供两个分支名: nut-git diff-branch <源分支> <目标分支>')
+                    printError('请提供两个分支名: nut git diff-branch <源分支> <目标分支>')
                     process.exit(1)
                 }
                 const result = await git.diffBranches(args[0], args[1])
@@ -705,7 +705,7 @@ async function main(): Promise<void> {
                             if (mismatched.length > 20) {
                                 console.log(`    ... 还有 ${mismatched.length - 20} 个文件`)
                             }
-                            console.log('\n  使用 nut-git lf --fix 修复')
+                            console.log('\n  使用 nut git lf --fix 修复')
                         }
                     } else {
                         printError(result.message)
@@ -808,7 +808,7 @@ async function main(): Promise<void> {
             // ==================== 未知命令 ====================
             default:
                 printError(`未知命令: ${command}`)
-                console.log('使用 nut-git --help 查看可用命令')
+                console.log('使用 nut git --help 查看可用命令')
                 process.exit(1)
         }
     } catch (error) {
@@ -861,7 +861,3 @@ function printDiffResult(result: GitResult): void {
 }
 
 // ==================== 入口 ====================
-
-main()
-
-export { main }

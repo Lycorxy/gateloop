@@ -50,7 +50,7 @@ user-card/
 
 ---
 
-## 铁律 4 — 状态管理极简原则
+## 铁律 4 — 状态管理极简原则 + 状态审计
 
 ```
 优先级（从高到低）：
@@ -64,6 +64,30 @@ user-card/
 ❌ 禁止：深度耦合全局状态（一个组件依赖 3+ 个 store slice）
 ✅ 推荐：Context + useReducer 组合解决模块级状态
 ✅ 推荐：能用 props drilling 2层内就不引入 Context
+```
+
+### 4.1 状态审计（写代码前必须执行）
+
+```
+🔴 写代码前必须扫描目标目录已有的 hooks/，确认已有 hook 列表
+🔴 已有 hook 能满足需求 → 必须复用，禁止重新实现
+🔴 已有 hook 需要扩展 → 扩展已有 hook，禁止新建同功能 hook
+
+状态审计 Checklist（每个 useState 必须过）：
+  □ 这个状态只有当前组件用？→ useState ✅
+  □ 这个状态 2+ 组件需要？→ Context/Zustand，禁止 useState + props drilling > 2 层
+  □ 这个状态是从其他状态派生的？→ useMemo，禁止独立 useState
+  □ 这个状态是弹窗开关/hover/表单临时值？→ useState，禁止进 Store
+
+同类状态合并规则：
+  □ 同类弹窗状态 ≥ 2 套 → 合并为 useModalState(type) 通用 hook
+  □ 同类 loading 状态 ≥ 3 个 → 合并为 loadingMap: Record<string, boolean>
+  □ 同类数据加载逻辑 ≥ 2 套 → 抽取通用 useAsyncData hook
+
+🔴 写完代码后自检：
+  □ 页面 useState ≥ 8 个 → 检查是否有可合并/可派生的状态
+  □ 新写了 hook 而目录中已有同功能 hook → 违规，必须合并
+  □ Store 中有弹窗开关/表单临时值 → 违规，必须迁出到 useState
 ```
 
 ---

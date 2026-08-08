@@ -390,10 +390,50 @@ export interface SSHSetupOptions {
     keyBits?: number
     /** 帐号标识（多帐号用，如 personal/shared） */
     account?: string
-    /** 自定义密钥文件名（不含路径） */
+    /** 自定义密钥文件名（不含路径，默认 id_ed25519_{platform}） */
     keyName?: string
-    /** Token（可选，用于验证） */
+    /** Token（可选；不传则自动走 OAuth 授权获取） */
     token?: string
+    /** 密钥已存在时是否强制覆盖（删除后重新生成） */
+    force?: boolean
+    /** 是否跳过远程公钥上传（仅本地配置） */
+    skipUpload?: boolean
+}
+
+/** 工蜂/GitLab 远程 SSH Key 信息 */
+export interface SSHKeyInfo {
+    /** Key ID（用于删除） */
+    id: number
+    /** 标题 */
+    title: string
+    /** 公钥内容 */
+    key: string
+    /** 创建时间（ISO 字符串） */
+    createdAt: string
+}
+
+/** 上传公钥结果（区分"已存在"与"其他失败"） */
+export interface UploadKeyResult {
+    /** 是否成功 */
+    success: boolean
+    /** 公钥已在平台存在（指纹重复） */
+    alreadyExists: boolean
+    /** 错误信息 */
+    error?: string
+}
+
+/** Token 验证结果 */
+export interface VerifyTokenResult {
+    /** 是否有效 */
+    valid: boolean
+    /** 用户名 */
+    username?: string
+    /** 用户全名 */
+    name?: string
+    /** 用户 ID */
+    userId?: number
+    /** 错误信息 */
+    error?: string
 }
 
 /** 多帐号配置项 */

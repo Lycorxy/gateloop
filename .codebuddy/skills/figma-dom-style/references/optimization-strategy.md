@@ -1,38 +1,58 @@
-# 优化策略 — v4 逐层修复指南
+# 优化策略 — v5 逐层修复指南（集成 layout-plan）
 
 ## 核心原则
 
 **DSL 是测量报告，不是施工图纸。** 模型读 DSL 理解设计稿后，用最优的 DOM+CSS 结构还原。
 
-## 1. 5 阶段输出流程
+**layout-plan.json 是布局方案，是施工蓝图。** Step 3 必须先读 layout-plan.json，按方案执行。
+
+## 0. 前置条件（Step 3 开始前必须满足）
 
 ```
-阶段 A — 整体布局设计（确定骨架）
-阶段 B — 区域内部布局（确定排列）
-阶段 C — 尺寸和间距（精确取值）
+① layout-plan.json 存在于临时目录中（Step 2b 产出）
+② 读取 layout-plan.json 到内存
+③ 按 implementationOrder 的 phase 顺序执行
+④ 每个 layoutDecision 的 confidence ≥ 0.7 才应用优化
+⑤ confidence < 0.7 → 保留 absolute
+```
+
+## 1. 6 阶段输出流程
+
+```
+阶段 A — 整体布局设计（消费 layout-plan.skeleton）
+阶段 B — 区域内部布局（消费 layout-plan.components）
+阶段 C — 尺寸和间距（消费 layout-plan.layoutDecisions）
 阶段 D — 样式细节（颜色/字体/边框/圆角）
 阶段 E — 资源处理（图片/图标）
+阶段 F — 交互状态 CSS（消费 interaction DSL）
 
 每阶段独立思考，不要跳过前面的直接写后面的。
+阶段 A/B/C 强制参考 layout-plan.json。
 ```
 
-## 2. 阶段 A — 整体布局
+## 2. 阶段 A — 整体布局（消费 layout-plan.skeleton）
 
 ### 分析步骤
 
 ```
-① 看 metadata.width/height → 画布尺寸
-② 看第一层 children 的 top 值 → 区域划分
-   例：top:0 菜单列表 / top:940 底部触发器
-   → 这是一个"上方内容 + 底部固定"的结构
-③ 看最外层容器的 border → 是否有边界线
-④ 看 annotation → 布局容器？溢出处理？
+① 读取 layout-plan.skeleton.layout → 顶层布局方向
+② 读取 layout-plan.skeleton.regions → 区块划分
+③ 每个 region 的 layout/sizing/overflow → 直接使用
+④ 看 annotation → 覆盖/补充
 
-决策树：
-  全部垂直排列（top 递增）→ flex-direction: column
-  顶部 + 内容 + 底部 → flex + justify-content: space-between
-  左右分栏 → flex-row / grid-template-columns
-  复杂网格 → grid
+如果 layout-plan 不存在（降级模式）：
+  ① 看 metadata.width/height → 画布尺寸
+  ② 看第一层 children 的 top 值 → 区域划分
+     例：top:0 菜单列表 / top:940 底部触发器
+     → 这是一个"上方内容 + 底部固定"的结构
+  ③ 看最外层容器的 border → 是否有边界线
+  ④ 看 annotation → 布局容器？溢出处理？
+
+  决策树：
+    全部垂直排列（top 递增）→ flex-direction: column
+    顶部 + 内容 + 底部 → flex + justify-content: space-between
+    左右分栏 → flex-row / grid-template-columns
+    复杂网格 → grid
 ```
 
 ### 合并嵌套规则
@@ -149,19 +169,20 @@ DSL:
 注意：选中行的右侧悬浮图标用 absolute 是合理的（它们不在正常文档流中）
 ```
 
-## 4. 阶段 C — 尺寸和间距
+## 4. 阶段 C — 尺寸和间距（消费 css-technique-library.md）
 
 ### DSL → CSS 精确映射
 
-| DSL 字段 | CSS 属性 | 说明 |
-|----------|---------|------|
-| `width: "208px"` | `width: 208px` | 直接取值 |
-| `height: "40px"` | `height: 40px` | 直接取值 |
-| `left: "16px"` | `padding-left: 16px` 或 `margin-left: 16px` | 上下文决定 |
-| `top: "12px"` | `padding-top: 12px` 或 `margin-top: 12px` | 上下文决定 |
-| `padding: "20px 16px"` | `padding: 20px 16px` | 直接取值 |
-| 相邻元素 top 差 52px | `gap: 12px`（高度 40px） | 计算得出 |
-| `border_width: "1px"` | `border-width: 1px` | 直接取值 |
+> ⚠️ 完整映射表见 `references/css-technique-library.md` 底部。以下为常用速查。
+
+| DSL 字段 | 原始含义 | 优化后 CSS | 技巧编号 |
+|----------|---------|-----------|---------|
+| `left: "Npx"` | 绝对左偏移 | `padding-left: Npx` 或删除 | T2 |
+| `top: "Npx"` | 绝对顶偏移 | `padding-top: Npx` 或删除 | T2 |
+| `width ≈ parent` | 撑满 | `width: auto` 或 `flex: 1` | T3 |
+| `position: abs` | 绝对定位 | 删除（flex/grid child） | T1 |
+| `rgba(R,G,B,1)` | 精确色 | `#HEX` | - |
+| 相邻 top 差 | 间距 | `gap: {差值}px` | T2 |
 
 ### 间距计算规则
 
@@ -173,6 +194,7 @@ DSL:
 
 ⚠️ 关键：如果 DSL 用 absolute 定位，top 值是相对于容器的
          转为 CSS 时必须减去容器自身的 padding
+⚠️ 禁止同时设 margin-top 和 margin-bottom（优先用 gap）
 ```
 
 ## 5. 阶段 D — 样式细节
@@ -373,22 +395,33 @@ html_to_image 从视口 (0,0) 截取指定 width×height：
   </body>
 ```
 
-## 9. 禁止模式
+## 9. 禁止模式（v11 增强版 — 对齐 css-technique-library.md）
 
 ```
-✗ 全文 absolute 定位 → 能用 flex/grid/block 就不用 absolute
-✗ 三层嵌套不合并 → 单子节点容器必须扁平化
-✗ 手算居中偏移 → 必须用 flex align-items:center / justify-content:center
-✗ 忽略 vcenter hint → 这是 Figma 的垂直居中标记
-✗ 跳过阶段 A 直接写样式 → 必须先确定整体布局
-✗ 忽略 annotation 数据 → role/component_desc/note/size_preset/overflow 都要用于
-✗ 有交互 DSL 不生成交互状态 → data-* 属性 + 状态 CSS
-✗ 全文内联 style → 超过 3 个相同样式提取为 class
-✗ 硬编码颜色 → 用 CSS 变量 :root { --primary: #1E67FA; }
-✗ body 设 padding/margin（html_to_image 从 (0,0) 截，body 偏移 = 内容被裁）
-✗ border-box 下用 padding-bottom 制造间距（间距必须用 margin）
-✗ 相邻行只设 height 不检查 top 差（gap 被漏掉）
-✗ margin-left:auto 推到右边缘不验证 right 间距
+L1 禁止（绝对杜绝）：
+  ✗ 全文 absolute → 能用 flex/grid/block 就不用
+  ✗ hand 算居中偏移 → 必须用 flex/grid align/justify 原生居中
+  ✗ margin 制造内部间距 → 优先 gap，次选 padding
+  ✗ 硬编码颜色 → 必须提取为 CSS 变量
+  ✗ figma URL 进入交付 DSL → 只用 iconRef/imageRef
+
+L2 禁止（强烈避免）：
+  ✗ 单子节点无样式容器不合并 → 扁平化
+  ✗ 相邻元素同时设 margin-top + margin-bottom → 塌陷风险
+  ✗ 忽略 box-sizing → 始终设 border-box
+  ✗ body 设 padding/margin → html_to_image 从 (0,0) 截
+  ✗ inline-block 列表不消除间隙 → font-size:0 或用 flex
+  ✗ 忽略 white-space → 单行文本 nowrap + overflow + ellipsis
+
+L3 禁止（避免反模式）：
+  ✗ border-box 下用 padding-bottom 制造间距
+  ✗ 相邻行只设 height 不检查 top 差（gap 被漏掉）
+  ✗ margin-left:auto 推右不验证 right 间距
+  ✗ 装饰节点不用伪元素（多一个 DOM 节点）
+  ✗ 三层嵌套不合并（手动算 offset 导致误差累积）
+  ✗ 手写 SVG path 到 DSL → 必须用 iconRef
+  ✗ 图片容器不设 object-fit → 变形
+  ✗ 复选框文字不对齐 → vertical-align: middle; margin-top: -2px
 ```
 
 ## 10. 标注驱动的语义化映射（v5 新增）

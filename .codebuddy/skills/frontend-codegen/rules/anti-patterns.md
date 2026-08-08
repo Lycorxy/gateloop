@@ -27,6 +27,23 @@ alwaysApply: true
 ❌ 组件命名用 PascalCase 目录（应该 kebab-case 目录 + index.tsx）
 ❌ 过度设计（简单功能拆 10 个文件）
 ❌ 过度耦合（一个组件 import 10 个全局 store）
+
+━━━ 渲染/请求效率反模式（v2.1 新增） ━━━
+
+❌ useEffect 依赖数组缺失或不完整（导致闭包过期/无限循环）
+❌ useEffect 内 setState 触发另一个 useEffect 链式反应
+❌ 多个 useEffect 监听同一数据源做不同事（应合并为一个）
+❌ 对象/数组直接放 useEffect 依赖（每次渲染新引用→无限触发）
+❌ 组件每次 re-render 都创建新函数传给子组件（缺 useCallback）
+❌ 同一接口在父组件和子组件各请求一次（应父组件请求后传 props）
+❌ Tab 切换每次都重新请求已加载的数据（应缓存结果）
+❌ 输入框 onChange 每次都发请求（必须防抖 300ms）
+❌ 组件卸载后异步回调仍执行 setState（缺 AbortController/cleanup）
+❌ 列表渲染子组件不用 React.memo（大列表每次全量 re-render）
+❌ useMemo/useCallback 依赖过多或过少（滥用或遗漏）
+❌ 同功能弹窗创建多个组件实例（应一个组件 + mode 参数）
+❌ 已有 hook 不复用，重新实现同功能逻辑
+❌ 派生状态用 useState + useEffect 同步（应 useMemo 直接派生）
 ```
 
 ---
@@ -42,6 +59,8 @@ alwaysApply: true
   3. 有 useState + useEffect 组合逻辑 → 提取到 hook.ts
   4. 有复杂条件渲染(JSX>40行) → 抽子组件
   5. 有重复的数据转换 → 提取到公共 utils/
+  6. 有纯数据处理函数（不依赖组件状态）→ 提取到 utils.ts（v2.1新增）
+  7. 有接口请求逻辑 → 提取到 api/ 或 hook.ts（v2.1新增）
 
 不要过度拆分（反设计）：
   - 只有 1 个简单 useState → 不需要 hook.ts
@@ -130,6 +149,13 @@ export function UserList() {
   □ 每个文件 ≤ 360 行
   □ 单函数 ≤ 25 行
 
+【函数归属检查（v2.1 新增）】
+  □ index.tsx 中无纯计算函数（应在 utils.ts）
+  □ index.tsx 中无 fetch/axios 调用（应在 api/ 或 hook.ts）
+  □ index.tsx 中无超过 5 行的数据加工逻辑
+  □ hook.ts 中无不依赖 React hooks 的纯函数（应在 utils.ts）
+  □ 同一功能未在多处重复实现
+
 【复杂度检查】
   □ 单函数圈复杂度 ≤ 10
   □ if/else 嵌套 ≤ 5 层
@@ -137,11 +163,26 @@ export function UserList() {
   □ && || 链式条件 ≤ 4 个
   □ 无单函数同时处理正常流程 + 多种异常流程
 
-【状态管理检查】
+【状态管理检查（v2.1 增强）】
   □ 未引入不必要的三方状态库
   □ 局部状态用 useState
   □ 模块共享用 Context（如果需要）
   □ 无全局状态深度耦合
+  □ 已有 hook 已复用（未重新实现同功能 hook）
+  □ 同类状态已合并（无 3+ 套相似 useState 组合）
+  □ 派生状态用 useMemo（非 useState + useEffect 同步）
+  □ 弹窗开关/hover/表单临时值用 useState 而非 Store
+
+【渲染/请求效率检查（v2.1 新增）】
+  □ 每个 useEffect 依赖数组完整且正确
+  □ 无链式 useEffect（A 的 setState 触发 B 的 useEffect）
+  □ 对象/数组依赖已用 useRef/useMemo 稳定引用
+  □ 列表子组件已用 React.memo 包裹
+  □ 传给子组件的回调已用 useCallback 包裹
+  □ 同一数据源只请求一次（子组件不重复请求父组件已有数据）
+  □ 输入框搜索已防抖（≥300ms）
+  □ 组件卸载时已取消进行中的请求（AbortController/cleanup）
+  □ Tab 切换不重复请求已加载数据
 
 【性能与稳定性检查】
   □ JSON.parse 有 try/catch + 默认值

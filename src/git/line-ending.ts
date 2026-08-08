@@ -202,7 +202,6 @@ export async function checkAndFixLineEndings(
     const workDir = cwd || process.cwd()
     const { expected, fix = false, stagedOnly = false, backup = true } = options
 
-    // 确保在 Git 仓库中
     const isRepo = await isGitRepo(workDir)
     if (!isRepo) {
         return { success: false, error: '当前目录不是 Git 仓库' }
@@ -211,133 +210,132 @@ export async function checkAndFixLineEndings(
     const root = await getGitRoot(workDir)
 
     try {
-        // 获取文件列表
-        let fileList: string[]
-        if (stagedOnly) {
-            const output = await gitExecOrThrow(['diff', '--name-only', '--cached'], {
+        const fileList = await getFileList(root, stagedOnly)
+        const textFiles = fileList.filter(isTextFile)
+
+        const { report, fixTasks } = scanFiles(textFiles, root, expected, fix)
+        const fixedCount = fix ? await fixFiles(fixTasks, root, stagedOnly, backup) : 0
+
+        return { success: true, report, fixedCount }
+    } catch (error) {
+        return { success: false, error: (error as Error).message }
+    }
+}
+
+/** 获取文件列表（stagedOnly 时取暂存区，否则取全部跟踪文件） */
+async function getFileList(root: string, stagedOnly: boolean): Promise<string[]> {
+    const args = stagedOnly ? ['diff', '--name-only', '--cached'] : ['ls-files']
+    const output = await gitExecOrThrow(args, { cwd: root, silent: true })
+    return output.split('\n').filter(Boolean)
+}
+
+/** 扫描文件：统计行尾符 + 收集待修复任务 */
+function scanFiles(
+    files: string[],
+    root: string,
+    expected: LineEnding,
+    collectFixTasks: boolean
+): { report: LineEndingReport; fixTasks: FixTask[] } {
+    const report: LineEndingReport = {
+        totalFiles: files.length,
+        lfFiles: 0,
+        crlfFiles: 0,
+        mixedFiles: 0,
+        expected,
+        mismatched: []
+    }
+    const fixTasks: FixTask[] = []
+
+    for (const file of files) {
+        try {
+            const fullPath = join(root, file)
+            if (!existsSync(fullPath)) continue
+
+            const content = readFileSync(fullPath, 'utf-8')
+            const ending = detectLineEnding(content)
+            updateReportCount(report, ending)
+
+            if (ending !== expected) {
+                report.mismatched.push({ path: file, current: ending, expected })
+                if (collectFixTasks) {
+                    fixTasks.push({ path: file, current: ending, expected })
+                }
+            }
+        } catch {
+            // 跳过无法读取的文件
+        }
+    }
+
+    return { report, fixTasks }
+}
+
+/** 更新报告计数 */
+function updateReportCount(report: LineEndingReport, ending: LineEnding | 'mixed'): void {
+    if (ending === 'lf') report.lfFiles++
+    else if (ending === 'crlf') report.crlfFiles++
+    else report.mixedFiles++
+}
+
+/** 执行修复：备份 → 转换 → 重新暂存 */
+async function fixFiles(
+    tasks: FixTask[],
+    root: string,
+    stagedOnly: boolean,
+    backup: boolean
+): Promise<number> {
+    if (tasks.length === 0) return 0
+
+    if (backup) {
+        try {
+            await gitExec(['stash', 'push', '-m', 'nut-line-ending-backup'], {
                 cwd: root,
                 silent: true
             })
-            fileList = output.split('\n').filter(Boolean)
-        } else {
-            const output = await gitExecOrThrow(['ls-files'], { cwd: root, silent: true })
-            fileList = output.split('\n').filter(Boolean)
-        }
-
-        // 过滤文本文件
-        const textFiles = fileList.filter(isTextFile)
-        const report: LineEndingReport = {
-            totalFiles: textFiles.length,
-            lfFiles: 0,
-            crlfFiles: 0,
-            mixedFiles: 0,
-            expected,
-            mismatched: []
-        }
-
-        const fixTasks: { path: string; current: LineEnding | 'mixed'; expected: LineEnding }[] = []
-
-        // 扫描每个文件
-        for (const file of textFiles) {
-            try {
-                const fullPath = join(root, file)
-                if (!existsSync(fullPath)) continue
-
-                const content = readFileSync(fullPath, 'utf-8')
-                const ending = detectLineEnding(content)
-
-                switch (ending) {
-                    case 'lf':
-                        report.lfFiles++
-                        break
-                    case 'crlf':
-                        report.crlfFiles++
-                        break
-                    case 'mixed':
-                        report.mixedFiles++
-                        break
-                }
-
-                if (ending !== expected) {
-                    report.mismatched.push({
-                        path: file,
-                        current: ending,
-                        expected
-                    })
-
-                    if (fix) {
-                        fixTasks.push({
-                            path: file,
-                            current: ending,
-                            expected
-                        })
-                    }
-                }
-            } catch {
-                // 跳过无法读取的文件
-            }
-        }
-
-        // 执行修复
-        let fixedCount = 0
-        if (fix && fixTasks.length > 0) {
-            // 备份（使用 git stash）
-            if (backup) {
-                try {
-                    await gitExec(['stash', 'push', '-m', 'nut-line-ending-backup'], {
-                        cwd: root,
-                        silent: true
-                    })
-                } catch {
-                    // 忽略备份失败
-                }
-            }
-
-            for (const task of fixTasks) {
-                try {
-                    const fullPath = join(root, task.path)
-                    let content = readFileSync(fullPath, 'utf-8')
-
-                    if (task.expected === 'lf') {
-                        // 转换为 LF
-                        content = content.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
-                    } else {
-                        // 转换为 CRLF
-                        content = content
-                            .replace(/\r\n/g, '\n')
-                            .replace(/\r/g, '\n')
-                            .replace(/\n/g, '\r\n')
-                    }
-
-                    writeFileSync(fullPath, content, 'utf-8')
-                    fixedCount++
-                } catch {
-                    // 修复失败，跳过
-                }
-            }
-
-            // 重新暂存已修复的文件
-            if (stagedOnly && fixedCount > 0) {
-                try {
-                    const fixedPaths = fixTasks.map((t) => t.path)
-                    await gitExec(['add', '--', ...fixedPaths], { cwd: root, silent: true })
-                } catch {
-                    // 忽略
-                }
-            }
-        }
-
-        return {
-            success: true,
-            report,
-            fixedCount
-        }
-    } catch (error) {
-        return {
-            success: false,
-            error: (error as Error).message
+        } catch {
+            // 忽略备份失败
         }
     }
+
+    let fixedCount = 0
+    for (const task of tasks) {
+        fixedCount += tryFixFile(task, root)
+    }
+
+    if (stagedOnly && fixedCount > 0) {
+        try {
+            const fixedPaths = tasks.map((t) => t.path)
+            await gitExec(['add', '--', ...fixedPaths], { cwd: root, silent: true })
+        } catch {
+            // 忽略
+        }
+    }
+
+    return fixedCount
+}
+
+/** 修复单个文件的换行符 */
+function tryFixFile(task: FixTask, root: string): number {
+    try {
+        const fullPath = join(root, task.path)
+        let content = readFileSync(fullPath, 'utf-8')
+
+        content =
+            task.expected === 'lf'
+                ? content.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+                : content.replace(/\r\n/g, '\n').replace(/\r/g, '\n').replace(/\n/g, '\r\n')
+
+        writeFileSync(fullPath, content, 'utf-8')
+        return 1
+    } catch {
+        return 0
+    }
+}
+
+/** 修复任务 */
+interface FixTask {
+    path: string
+    current: LineEnding | 'mixed'
+    expected: LineEnding
 }
 
 /**

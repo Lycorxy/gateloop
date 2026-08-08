@@ -41,6 +41,7 @@
       "maxAttempts": 8,
       "allowedTools": ["read_file", "write_file", "replace_in_file", "search_content"],
       "verify": {
+        "lintFix": true,
         "lint": true,
         "tsc": true,
         "stylelint": true,

@@ -20,16 +20,25 @@ trigger-keywords:
     - 代码格式
 
 # ── 依赖关系 ──
-# 🔒 depends-on 必须包含 specflow-rules-engine（规则注入引擎）
-depends-on:
-    - specflow-rules-engine
+# v12: 去掉 specflow-rules-engine，规则由 ADS reads + rulesInline 内联
+# 被 frontend-codegen anchor "code" 调用时，RULE.mdc 由引擎读取后内联
+depends-on: []
 mutual-exclude: [code-review-check]
-require-tools: [read_file, write_file, replace_in_file, search_content, search_file, execute_command, list_dir]
+require-tools:
+    [read_file, write_file, replace_in_file, search_content, search_file, execute_command, list_dir]
 
 # ── 生命周期 ──
 load-strategy: lazy
 unload-after-run: true
 max-duration: 300
+
+# ── ADS Harness 集成 ──
+# 本 skill 是 frontend-codegen ADS harness 的子 skill
+# anchor "code": 前置调用任务1+2（规则提取+注入），编码后调用任务3（验证修复闭环）
+# 规则注入：ADS reads → RULE.mdc → rulesInline 内联进指令 JSON
+# 门禁验证：ADS verify → tsc + lint exit code 强制（stylelint 按需触发，仅项目有配置时跑）
+# 状态管理：ADS anchor-state.json（code 阶段状态由引擎管理）
+# 断线恢复：nut ads status 随时查看当前进度
 
 # ── 触发权重 ──
 trigger-weight:

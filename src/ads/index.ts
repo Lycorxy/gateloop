@@ -23,8 +23,10 @@ import type {
     AnchorInstruction,
     VerifyResult,
     AnchorDefinition,
+    AnchorState,
     SubTask,
-    Artifact
+    Artifact,
+    LogEntry
 } from './types'
 import {
     initTask,
@@ -115,7 +117,8 @@ export class Ads {
     async next(): Promise<AnchorInstruction> {
         return doNext(
             this.manifest,
-            (anchor: AnchorDefinition, cwd: string, state) => verify(anchor, cwd, state),
+            (anchor: AnchorDefinition, cwd: string, state, hooks) =>
+                verify(anchor, cwd, state, hooks),
             this.cwd
         )
     }
@@ -251,7 +254,7 @@ export class Ads {
     // ==================== 只读访问 ====================
 
     /** 获取当前状态（只读） */
-    getState() {
+    getState(): AnchorState | null {
         return readState(this.cwd, this.manifest.stateFile)
     }
 
@@ -261,7 +264,7 @@ export class Ads {
     }
 
     /** 手动追加日志（供外部记事） */
-    log(action: string, message: string, verifyResult?: VerifyResult): void {
+    log(action: LogEntry['action'], message: string, verifyResult?: VerifyResult): void {
         const state = readState(this.cwd, this.manifest.stateFile)
         appendLog(
             this.cwd,
@@ -270,7 +273,7 @@ export class Ads {
                 skill: this.manifest.name,
                 task: state?.task || '',
                 stage: state?.currentStage || '',
-                action: action as 'init' | 'advance' | 'verify' | 'done',
+                action,
                 verifyResult,
                 message
             },
@@ -294,6 +297,14 @@ export {
     emitArtifact,
     retryStage
 } from './state'
+
+// 度量脚本（floor-ceiling 哲学落地）
+export { runMetric, printMetricHelp } from './metrics/runner'
+export { metricDesign } from './metrics/design-metrics'
+export { metricArchitecture } from './metrics/architecture-metrics'
+export { metricCode } from './metrics/code-metrics'
+export { metricStyleCrosscheck } from './metrics/style-crosscheck'
+export type { MetricResult, MetricFact } from './metrics/types'
 export {
     generateTaskId,
     initScratch,
@@ -318,7 +329,12 @@ export type {
     ArtifactInline,
     VerifyResult,
     VerifyCheck,
+    VerifyHooks,
     LogEntry,
     AdsOptions,
-    JSONSchema
+    JSONSchema,
+    ReviewItem,
+    ReviewConfig,
+    ReviewVerdict,
+    ReviewConclusion
 } from './types'

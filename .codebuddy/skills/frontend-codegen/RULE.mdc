@@ -2,29 +2,79 @@
 description: 前端代码生成核心铁律。当执行前端代码生成(frontend-codegen)、创建TSX/TS/SCSS文件、拆分组件时必须遵守。包含：环境检测、文件规模、组件命名、TS类型、import顺序、错误处理、安全约束、响应式布局、反模式。
 alwaysApply: true
 enabled: true
-updatedAt: 2026-07-03T11:21:00.000Z
+updatedAt: 2026-08-03T12:00:00.000Z
 provider:
 ---
 
 # 前端代码生成 — 核心铁律
 
-## 铁律 0 — 禁止跳过 + 项目环境检测（最高优先级）
+## 铁律 0 — ADS Harness 驱动 + 项目环境检测（最高优先级）
 
-本 Skill 所有步骤强制执行，禁止跳过，禁止偷懒：
-  ✗ 禁止跳过 Step 0 规则注入
-  ✗ 禁止跳过 Step 1 环境检测
-  ✗ 禁止跳过 Step 5/6 验证（0 错误才交付）
-  ✗ 禁止行数超限不拆分（偷懒超限交付）
-  ✗ 禁止验证有错误就交付（必须自动修复到 0 错误，不让用户手动）
+本 Skill 由 ADS 引擎驱动（anchor.config.json），流程由引擎状态机推进，验证由引擎 exit code 判定：
+✓ 规则由 ADS reads + rulesInline 内联（不再调用 specflow-rules-engine）
+✓ 门禁由 ADS verify exit code 强制（不再依赖模型自觉的 Gate）
+✓ 状态由 anchor-state.json 唯一管理（不再在模型脑子里）
+✗ 禁止跳过引擎验证（nut ads next 会强制重跑 verify）
+✗ 禁止行数超限不拆分（偷懒超限交付）
+✗ 禁止验证有错误就交付（必须自动修复到 0 错误，不让用户手动）
+✗ 禁止用 tsc 替代 nut lint run（tsc 只查类型，lint 查格式化+圈复杂度+ESLint 规则）
+✗ 禁止拆分函数后不递归验证（子函数可能又超标）
+
+### 命令规范（npx nut + 批量验证）
+
+```
+验证和修复一律使用 npx nut，批量验证，禁止逐文件：
+
+  ✓ npx nut lint run "src/lint"              验证（批量，1 次跑完目录）
+  ✓ npx nut lint fix "src/lint" --write      修复（批量自动修复）
+  ✓ npx tsc --noEmit                         类型检查（直接 npx tsc）
+  ✓ npx prettier --write "src/**/*.ts"       仅 Prettier 格式化（nut 无此子命令，直调 prettier）
+  ✗ npx nut lint run "src/lint" 2>&1        2>&1 多余 + 增加输出噪声
+  ✗ npx nut lint run src/a.ts                逐文件验证（慢 + 噪声 N 倍）
+
+nut lint 子命令清单（只有 5 个，无 format/check）：
+  extract   提取项目规则
+  knowledge 生成规则知识库
+  run       验证（Prettier+ESLint+Stylelint+tsc）
+  fix       修复（--write 自动修复）
+  config    诊断项目配置
+
+PowerShell CLIXML 噪声规避：
+  npx nut 在 PowerShell 下可能输出 <Objs ...> CLIXML 进度流噪声。
+  验证时只看 "✖ N problems" 行 + exit code，CLIXML 块可忽略。
+
+批量验证（1 次跑完目录所有文件），禁止逐文件：
+  ✓ npx nut lint run "src/lint"
+  ✗ npx nut lint run src/a.ts && npx nut lint run src/b.ts
+```
+
+### 临时文件隔离（scratch 目录）
+
+```
+中间产物（lint 输出、临时分析文件等）必须写入 scratchDir，禁止堆项目根：
+  ✓ .specflow/scratch/         frontend-codegen 的 scratchDir
+  ✓ .codebuddy/scratch/        code-quality-guard 的 scratchDir
+  ✗ lint_output.txt            禁止在项目根创建临时文件
+  ✗ tmp-*.cjs / tmp-*.txt     禁止在项目根创建临时文件
+```
 
 生成代码前必须读取项目配置（JSX运行时/TS严格/路径别名/UI库/样式方案/lint规则）。严禁假设默认配置。
 
-## 铁律 1 — 文件规模与结构（超限必须拆分·不偷懒）
+## 铁律 1 — 文件规模与结构（超限必须拆分·不偷懒·带逃生口）
 
 ```
 单文件 ≤ 360 行 | 单函数 ≤ 25 行 | 缩进 ≤ 2 层
 组件名=PascalCase | 文件名=kebab-case | 一个文件一个导出组件
 Hook文件: use-xxx.ts / hook.ts | 子组件目录: components/
+
+【命名规范已脚本化】（v12.1+ · 收敛型门禁）：
+  nut lint check-naming "src/**\/*.{ts,tsx}"
+  检查项：
+    - 文件名 kebab-case（例外：index/hook/types/constants/utils/use-xxx）
+    - .tsx 文件一个文件一个 default export
+    - Hook 文件命名 use-xxx.ts（含 useXxx 导出的文件必须 use-xxx.ts）
+    - PascalCase 组件名 ↔ kebab-case 文件名对应
+  违规 = exit 1 = ADS verify FAIL
 
 三文件模式（强制）：
   index.tsx ≤ 120 行 | hook.ts ≤ 150 行 | index.module.scss ≤ 200 行
@@ -32,6 +82,18 @@ Hook文件: use-xxx.ts / hook.ts | 子组件目录: components/
 ❌ 超过 360 行必须拆分，不允许偷懒超限交付
 ❌ 超限不拆分 = 违规，必须回退拆分后再交付
 ❌ 不允许"麻烦就放宽限制"，规范是硬性约束
+
+【圈复杂度逃生口】（11-13 允许声明例外）：
+  圈复杂度 ≤ 10：PASS
+  圈复杂度 11-13：触发"拆分建议"，模型可选择：
+    A. 拆分（默认推荐）
+    B. 加 // @complexity-justified: 此处为状态机 reducer，本质复杂不可拆 注释
+       custom 脚本扫描此注释，允许通过（但仍记录到度量报告供审计）
+  圈复杂度 > 13 / 函数 > 25 行 / 文件 > 360 行：必须拆分，无逃生口
+
+🔴 逃生口注释格式必须严格：// @complexity-justified: <具体理由>
+🔴 逃生口滥用（如所有函数都加）= 设计问题，需重新审视
+🔴 仅本质复杂场景可用（状态机 reducer / 配置驱动决策表 / 编译器类逻辑）
 ```
 
 ## 铁律 2 — TypeScript 类型
@@ -82,4 +144,91 @@ JSON.parse 必须 try/catch + 默认值 | 数组操作前 Array.isArray()
 □ :has() / @container / @layer / subgrid | □ !important(覆盖三方除外)
 □ 动画 width/height/top/left(用transform/opacity)
 □ 组件内嵌 fetch/数据转换 → 抽到 hook.ts / util.ts
+```
+
+## 铁律 8 — ADS Verify 门禁（强制·不可绕过·exit code 判定）
+
+```
+frontend-codegen 的 2 个 anchor 由 ADS 引擎强制验证，exit 0 才推进：
+
+  🔧 Anchor 1 — design（技术设计）
+     引擎验证：schema 校验 frontendPlan 结构（4 张表必须齐全）+ producesFresh
+     FAIL 动作：引擎返回 errors，模型补齐后重新 nut ads next
+     豁免条件：无
+
+  🔧 Anchor 2 — code（编码实现 + 验证交付）
+     引擎验证：tsc --noEmit + ESLint + npm run build + producesFresh（Stylelint 按需触发，仅项目有配置时跑）
+     前置步骤：检测规则知识库就绪（不存在则 nut lint knowledge 生成）
+     FAIL 动作：引擎返回 verifyResult.errors，模型修复后重新 nut ads next
+     豁免条件：无（每次必过）
+     熔断：连续失败 8 次 → escalated，需 nut ads retry 或人工介入
+
+🔴 禁止：跳过引擎验证（nut ads next 内部强制重跑 verify，模型无法绕过）
+🔴 禁止：自己声称"验证通过"（引擎不信嘴，只信 exit code）
+🔴 禁止：伪造门禁结果（引擎会重新执行真实命令）
+```
+
+## 铁律 9 — 精度基线优先 + antd 单组件 A/B（v10.0）
+
+### 两阶段 antd 决策
+
+```
+阶段 A：antdPhase=baseline
+  - verified-reference.html 的 DOM/CSS 必须机械映射为真实 React。
+  - 默认使用原生 DOM、独立组件和 Figma 原资源。
+  - 禁止主动使用 antd 近似替换。
+  - 编排器真实路由截图达标后，才允许进入阶段 B。
+
+阶段 B：antdPhase=candidate
+  - 一次只替换一个候选组件。
+  - 用 className/classNames/styles + :global 完整覆盖 antd 内部样式。
+  - 编排器在相同 viewport、状态、宿主中做真实截图 A/B。
+  - 相似度下降 <=0.5 个百分点且关键几何误差 <=1px 才保留。
+  - 不达标立即回退，保留独立组件。
+
+默认不得替换：插画、品牌/业务 SVG、复杂树节点、精确弹层。
+
+独立组件要求：
+  - 独立目录和 SCSS；
+  - 受控 props、事件回调、className 透传；
+  - DOM/CSS 来自 verified-reference.html；
+  - 精确值来自 origin-dsl.json + spacing-report.json；
+  - 资源来自 assets/manifest.json；
+  - 与业务逻辑解耦。
+
+🔴 禁止：基线未通过就使用 antd 近似替换
+🔴 禁止：一次替换多个候选导致差异无法归因
+🔴 禁止：antd 覆盖不达标仍强行使用
+🔴 禁止：为复用牺牲视觉一致性
+```
+
+### 已验证契约驱动实现
+
+```
+检测到 figma-codegen-contract.json 时，必须消费四类视觉输入：
+
+  - optimized-dsl.json：已验证节点身份、布局关系、source id
+  - verified-reference.html：已验证 DOM 层级和 CSS 写法
+  - origin-dsl.json + spacing-report.json：精确视觉值与盒模型
+  - assets/manifest.json：Figma SVG、插画、位图
+
+【baseline 实现顺序】
+  ① verified HTML 标签层级原样转 JSX，禁止新增 wrapper
+  ② verified CSS 原值迁移到 CSS Module
+  ③ 用 origin DSL/spacing 逐属性校验精确值
+  ④ 用 manifest 本地资源替换临时 URL
+  ⑤ 按 contract 写入目标状态、交互路径、data-figma-id
+  ⑥ 更新 translation-map，missing/uncertain 必须为 0
+
+【参考原则】
+  DOM/CSS 怎么写 → verified-reference.html
+  节点和布局关系 → optimized-dsl.json
+  精确值是什么 → origin-dsl.json + spacing-report.json
+  资源是什么 → assets/manifest.json
+  状态和截图环境 → figma-codegen-contract.json
+  工程怎么组织 → frontendPlan
+
+🔴 禁止：舍弃 verified HTML 后凭感觉重建 DOM
+🔴 禁止：只看一个 DSL 就开始写
+🔴 禁止：用近似 Token 覆盖不相等的设计值
 ```

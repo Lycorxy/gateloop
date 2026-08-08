@@ -3,6 +3,9 @@
  *
  * 一键配置 SSH Key，支持 GitHub/GitLab/Gitee/腾讯工蜂(git.woa.com)/自定义平台。
  * 支持多帐号配置、常见问题诊断、Windows 路径适配。
+ *
+ * 远程 Key 管理（注册/查询/删除/验证 Token）已拆分到 ssh-remote.ts。
+ * token 来源由 auth.ts 的 ensureToken() 自动获取，调用方无需传 token。
  */
 
 import { execSync } from 'node:child_process'
@@ -12,16 +15,20 @@ import {
     readFileSync,
     readdirSync,
     appendFileSync,
+    writeFileSync,
+    unlinkSync,
     chmodSync
 } from 'node:fs'
-import { homedir, platform } from 'node:os'
+import { homedir, platform, hostname, userInfo } from 'node:os'
 import { join } from 'node:path'
-import { request } from 'node:https'
+import { ensureToken } from './auth'
+import { uploadKey as uploadKeyRemote } from './ssh-remote'
 import type {
     SSHSetupOptions,
     SSHAccount,
     SSHTroubleshootResult,
     SSHTroubleshootCheck,
+    UploadKeyResult,
     GitResult
 } from './types'
 
@@ -32,11 +39,34 @@ const SSH_CONFIG_PATH = join(SSH_DIR, 'config')
 const IS_WIN = platform() === 'win32'
 
 /** 平台默认配置 */
-const PLATFORM_CONFIGS: Record<string, { host: string; user: string; port: number; addKeyUrl: string }> = {
-    github: { host: 'github.com', user: 'git', port: 22, addKeyUrl: 'https://github.com/settings/ssh/new' },
-    gitlab: { host: 'gitlab.com', user: 'git', port: 22, addKeyUrl: 'https://gitlab.com/-/profile/keys' },
-    gitee: { host: 'gitee.com', user: 'git', port: 22, addKeyUrl: 'https://gitee.com/profile/sshkeys' },
-    gitcode: { host: 'git.woa.com', user: 'git', port: 22, addKeyUrl: 'https://git.woa.com/-/profile/keys' }
+const PLATFORM_CONFIGS: Record<
+    string,
+    { host: string; user: string; port: number; addKeyUrl: string }
+> = {
+    github: {
+        host: 'github.com',
+        user: 'git',
+        port: 22,
+        addKeyUrl: 'https://github.com/settings/ssh/new'
+    },
+    gitlab: {
+        host: 'gitlab.com',
+        user: 'git',
+        port: 22,
+        addKeyUrl: 'https://gitlab.com/-/profile/keys'
+    },
+    gitee: {
+        host: 'gitee.com',
+        user: 'git',
+        port: 22,
+        addKeyUrl: 'https://gitee.com/profile/sshkeys'
+    },
+    gitcode: {
+        host: 'git.woa.com',
+        user: 'git',
+        port: 22,
+        addKeyUrl: 'https://git.woa.com/-/profile/keys'
+    }
 }
 
 /** 路径转 POSIX 风格（Windows 下 SSH config 需要正斜杠） */
@@ -44,7 +74,120 @@ function toPosixPath(p: string): string {
     return IS_WIN ? p.replace(/\\/g, '/') : p
 }
 
+/** 获取本机用户标识（用于密钥注释） */
+function getUserTag(): string {
+    try {
+        const u = userInfo().username || 'user'
+        return `${u}@${hostname()}`
+    } catch {
+        return 'nut-git@localhost'
+    }
+}
+
 // ==================== SSH 管理器 ====================
+
+/** setup 上下文 */
+interface SetupContext {
+    pf: string
+    email?: string
+    keyType: string
+    keyBits: number
+    account?: string
+    force: boolean
+    skipUpload: boolean
+    host: string
+    user: string
+    port: number
+    keyPath: string
+    pubKeyPath: string
+    platConf?: { host?: string; user?: string; port?: number; addKeyUrl?: string }
+}
+
+/** 解析 clean 上下文：hostAlias + 候选密钥路径 */
+function resolveCleanContext(
+    platform: string,
+    account?: string
+): { hostAlias: string; keyCandidates: string[] } {
+    const platConf = PLATFORM_CONFIGS[platform]
+    const host = platConf?.host || platform
+    const hostAlias = account ? `${host}-${account}` : host
+    const suffix = account ? `_${account}` : ''
+
+    return {
+        hostAlias,
+        keyCandidates: [
+            join(SSH_DIR, `id_ed25519_${platform}${suffix}`),
+            join(SSH_DIR, `id_rsa_${platform}${suffix}`)
+        ]
+    }
+}
+
+/** 查找公钥路径：先按命名约定查找，再从 SSH config 解析 */
+function findPubKeyPath(hostOrPlatform: string): string {
+    const candidates = [
+        join(SSH_DIR, `id_ed25519_${hostOrPlatform}.pub`),
+        join(SSH_DIR, `id_rsa_${hostOrPlatform}.pub`),
+        join(SSH_DIR, `${hostOrPlatform}.pub`),
+        join(SSH_DIR, 'id_ed25519.pub'),
+        join(SSH_DIR, 'id_rsa.pub')
+    ]
+
+    for (const c of candidates) {
+        if (existsSync(c)) return c
+    }
+
+    return findKeyFromConfig(hostOrPlatform)
+}
+
+/** 从 SSH config 解析 IdentityFile */
+function findKeyFromConfig(hostOrPlatform: string): string {
+    if (!existsSync(SSH_DIR) || !existsSync(SSH_CONFIG_PATH)) return ''
+
+    const config = readFileSync(SSH_CONFIG_PATH, 'utf-8')
+    const match = config.match(new RegExp(`Host ${hostOrPlatform}[\\s\\S]*?IdentityFile\\s+(\\S+)`))
+    if (!match) return ''
+
+    const pubCandidate = `${match[1]}.pub`
+    return existsSync(pubCandidate) ? pubCandidate : ''
+}
+
+/** 解析 setup options 为上下文 */
+function resolveSetupContext(options: SSHSetupOptions): SetupContext {
+    const {
+        platform: pf = 'github',
+        email,
+        keyType = 'ed25519',
+        keyBits = 4096,
+        account,
+        force = false,
+        skipUpload = false
+    } = options
+
+    const platConf = PLATFORM_CONFIGS[pf]
+    const host = options.host || platConf?.host || 'custom-host'
+    const user = options.user || platConf?.user || 'git'
+    const port = options.port || platConf?.port || 22
+
+    const keySuffix = account ? `_${account}` : ''
+    const keyName = options.keyName || `id_${keyType}_${pf}${keySuffix}`
+    const keyPath = join(SSH_DIR, keyName)
+
+    return {
+        pf,
+        email,
+        keyType,
+        keyBits,
+        account,
+        force,
+        skipUpload,
+        host,
+        user,
+        port,
+        keyPath,
+        pubKeyPath: `${keyPath}.pub`,
+        platConf
+    }
+}
 
 export class SSHManager {
     private cwd: string
@@ -56,96 +199,158 @@ export class SSHManager {
     /**
      * 一键配置 SSH
      *
+     * 流程：验证 Token → 生成/复用密钥 → 配置 config → 添加 agent → 上传公钥 → 测试连接
+     *
+     * token 自动来源：auth.ensureToken()（OAuth device flow，缓存 ~/.gfrc 300 天）。
+     * 调用方无需传 token；仅当 skipUpload=true 时跳过远程操作。
+     *
      * @example
-     * // 工蜂（腾讯内部）
+     * // 工蜂（自动授权 + 自动上传公钥）
      * await ssh.setup({ platform: 'gitcode', email: 'name@tencent.com' })
-     * // 自定义平台
-     * await ssh.setup({ platform: 'custom', host: 'git.example.com', email: 'me@example.com' })
-     * // 多帐号（公共帐号）
-     * await ssh.setup({ platform: 'gitcode', email: 'shared@tencent.com', account: 'shared' })
+     * // 强制覆盖已有密钥
+     * await ssh.setup({ platform: 'gitcode', force: true })
+     * // 自定义密钥名
+     * await ssh.setup({ platform: 'gitcode', keyName: 'id_ed25519_auto' })
      */
     async setup(options: SSHSetupOptions): Promise<GitResult> {
         const startTime = Date.now()
-        const {
-            platform: pf = 'github',
-            email,
-            keyType = 'ed25519',
-            keyBits = 4096,
-            account
-        } = options
-
-        const platConf = PLATFORM_CONFIGS[pf]
-        const host = options.host || platConf?.host || 'custom-host'
-        const user = options.user || platConf?.user || 'git'
-        const port = options.port || platConf?.port || 22
+        const setupCtx = resolveSetupContext(options)
 
         try {
             mkdirSync(SSH_DIR, { recursive: true })
 
-            // 密钥文件名：多帐号时加 account 后缀
-            const keySuffix = account ? `_${account}` : ''
-            const keyName = `id_${keyType}_${pf}${keySuffix}`
-            const keyPath = join(SSH_DIR, keyName)
-            const pubKeyPath = `${keyPath}.pub`
+            const keyResult = await this.prepareKey(setupCtx, startTime)
+            if (!keyResult.ok) return keyResult.error!
 
-            // 已存在则直接返回公钥
-            if (existsSync(keyPath) && existsSync(pubKeyPath)) {
-                const pubKey = readFileSync(pubKeyPath, 'utf-8').trim()
-                return this.successResult(startTime, {
-                    platform: pf, keyType, keyPath, publicKey: pubKey,
-                    alreadyExists: true,
-                    nextSteps: this.buildNextSteps(host, pubKey, platConf?.addKeyUrl)
-                })
-            }
+            await this.updateSSHConfig(
+                setupCtx.host,
+                setupCtx.user,
+                setupCtx.port,
+                keyResult.keyPath!,
+                setupCtx.account
+            )
+            this.addToAgent(keyResult.keyPath!)
 
-            // 生成密钥（不输入密码，-N ''）
-            const keyTypeFlag = keyType === 'ed25519' ? '-t ed25519' : `-t rsa -b ${keyBits}`
-            const comment = email || `nut-git-${pf}${keySuffix || ''}`
+            const uploadResult = await this.tryUploadKey(
+                options,
+                keyResult.pubKey!,
+                setupCtx.skipUpload
+            )
+            const connectionTest = this.testConnection(setupCtx.host, setupCtx.user, setupCtx.port)
+
+            return this.buildSetupResult(
+                startTime,
+                setupCtx,
+                keyResult,
+                uploadResult,
+                connectionTest
+            )
+        } catch (error) {
+            return this.failResult(
+                startTime,
+                `SSH 配置失败: ${error instanceof Error ? error.message : String(error)}`,
+                'SETUP_FAILED'
+            )
+        }
+    }
+
+    /** 准备密钥：生成新密钥或复用已有 */
+    private async prepareKey(
+        ctx: SetupContext,
+        startTime: number
+    ): Promise<{ ok: boolean; keyPath?: string; pubKey?: string; error?: GitResult }> {
+        const keyExists = existsSync(ctx.keyPath) && existsSync(ctx.pubKeyPath)
+        if (keyExists && ctx.force) this.removeKeyFiles(ctx.keyPath)
+
+        const shouldGenerate = ctx.force || !keyExists
+        let pubKey = ''
+
+        if (shouldGenerate) {
+            const flag = ctx.keyType === 'ed25519' ? '-t ed25519' : `-t rsa -b ${ctx.keyBits}`
+            const comment = ctx.email || getUserTag()
             try {
-                execSync(`ssh-keygen ${keyTypeFlag} -f "${keyPath}" -N "" -C "${comment}"`, {
-                    stdio: 'pipe', cwd: this.cwd
+                execSync(`ssh-keygen ${flag} -f "${ctx.keyPath}" -N "" -C "${comment}"`, {
+                    stdio: 'pipe',
+                    cwd: this.cwd
                 })
             } catch (error) {
-                return this.failResult(startTime, `密钥生成失败: ${(error as Error).message}`, 'KEY_GENERATION_FAILED')
+                return {
+                    ok: false,
+                    error: this.failResult(
+                        startTime,
+                        `密钥生成失败: ${error instanceof Error ? error.message : String(error)}`,
+                        'KEY_GENERATION_FAILED'
+                    )
+                }
             }
+            pubKey = readFileSync(ctx.pubKeyPath, 'utf-8').trim()
+        } else {
+            pubKey = readFileSync(ctx.pubKeyPath, 'utf-8').trim()
+        }
 
-            const pubKey = readFileSync(pubKeyPath, 'utf-8').trim()
+        return { ok: true, keyPath: ctx.keyPath, pubKey }
+    }
 
-            // 更新 SSH config（含 Port/ControlMaster/ControlPath）
-            await this.updateSSHConfig(host, user, port, keyPath, account)
+    /** 尝试上传公钥（跳过则返回 null） */
+    private async tryUploadKey(
+        options: SSHSetupOptions,
+        pubKey: string,
+        skipUpload: boolean
+    ): Promise<UploadKeyResult | null> {
+        if (skipUpload) return null
+        const token = options.token || (await ensureToken())
+        return token ? uploadKeyRemote(pubKey, token) : null
+    }
 
-            // 添加到 ssh-agent
-            const agentAdded = this.addToAgent(keyPath)
+    /** 构建 setup 成功结果 */
+    private buildSetupResult(
+        startTime: number,
+        ctx: SetupContext,
+        keyResult: { pubKey?: string; keyPath?: string },
+        uploadResult: UploadKeyResult | null,
+        connectionTest: string
+    ): GitResult {
+        const pubKey = keyResult.pubKey || ''
+        const uploaded = uploadResult?.success === true
+        const alreadyExists = uploadResult?.alreadyExists === true
 
-            // 自动上传公钥到平台（有 token 时）
-            let uploaded = false
-            if (options.token) {
-                uploaded = await this.uploadPublicKey(host, pubKey, options.token, pf)
-            }
+        const nextSteps = this.buildSetupNextSteps({
+            host: ctx.host,
+            pubKey,
+            addKeyUrl: ctx.platConf?.addKeyUrl,
+            uploaded,
+            alreadyExists,
+            uploadError: uploadResult?.error,
+            hasToken: Boolean(uploadResult),
+            skipUpload: ctx.skipUpload
+        })
 
-            // 测试连接
-            const connectionTest = this.testConnection(host, user, port)
-
-            return this.successResult(startTime, {
-                platform: pf, keyType, keyPath, publicKey: pubKey,
-                agentAdded, uploaded, connectionTest,
-                nextSteps: uploaded
-                    ? [`✅ 公钥已自动上传到 ${host}`, `验证: ssh -T git@${host}`]
-                    : this.buildNextSteps(host, pubKey, platConf?.addKeyUrl)
-            })
-        } catch (error) {
-            return this.failResult(startTime, `SSH 配置失败: ${(error as Error).message}`, 'SETUP_FAILED')
+        return {
+            success: true,
+            operation: 'stage',
+            message: this.buildSetupMessage({
+                generated: keyResult.pubKey !== undefined,
+                uploaded,
+                alreadyExists,
+                connectionTest
+            }),
+            data: {
+                platform: ctx.pf,
+                keyType: ctx.keyType,
+                keyPath: keyResult.keyPath,
+                publicKey: pubKey,
+                agentAdded: true,
+                uploaded,
+                alreadyExists,
+                connectionTest,
+                nextSteps
+            },
+            duration: Date.now() - startTime
         }
     }
 
     /**
      * 批量配置多帐号（个人 + 公共帐号）
-     *
-     * @example
-     * await ssh.setupMultiAccount('gitcode', [
-     *   { name: 'personal', email: 'me@tencent.com' },
-     *   { name: 'shared', email: 'shared@tencent.com' }
-     * ])
      */
     async setupMultiAccount(
         pf: 'github' | 'gitlab' | 'gitee' | 'gitcode',
@@ -175,8 +380,9 @@ export class SSHManager {
     }
 
     /**
-     * 更新 SSH config 文件
-     * 格式包含 Host/HostName/User/Port/ControlMaster/ControlPath/IdentityFile
+     * 更新 SSH config 文件（幂等：重复运行不产生重复配置块）
+     *
+     * 配置块含 Host/HostName/User/Port/IdentityFile/IdentitiesOnly/StrictHostKeyChecking。
      */
     private async updateSSHConfig(
         host: string,
@@ -185,12 +391,11 @@ export class SSHManager {
         keyPath: string,
         account?: string
     ): Promise<void> {
-        // 多帐号时 Host 用别名区分（如 git.woa.com-shared）
         const hostAlias = account ? `${host}-${account}` : host
         const identityFile = toPosixPath(keyPath)
 
         const configBlock = `
-# ${hostAlias} - 由 node-ultra 自动配置${account ? ` (${account})` : ''}
+# ${hostAlias} - 由 ai-ultra 自动配置${account ? ` (${account})` : ''}
 Host ${hostAlias}
     HostName ${host}
     User ${user}
@@ -200,11 +405,17 @@ Host ${hostAlias}
     IdentityFile ${identityFile}
     IdentitiesOnly yes
     PreferredAuthentications publickey
+    StrictHostKeyChecking accept-new
 `
 
         if (existsSync(SSH_CONFIG_PATH)) {
             const existing = readFileSync(SSH_CONFIG_PATH, 'utf-8')
-            if (existing.includes(`Host ${hostAlias}`)) return // 已配置
+            // 已存在同名 Host 块则先移除再追加（实现幂等更新）
+            if (existing.includes(`Host ${hostAlias}`)) {
+                const updated = this.removeConfigBlock(existing, hostAlias)
+                writeFileSync(SSH_CONFIG_PATH, updated + configBlock, 'utf-8')
+                return
+            }
         }
 
         appendFileSync(SSH_CONFIG_PATH, configBlock, 'utf-8')
@@ -213,6 +424,50 @@ Host ${hostAlias}
             chmodSync(SSH_CONFIG_PATH, 0o600)
         } catch {
             // Windows 可能不支持 chmod
+        }
+    }
+
+    /**
+     * 从 config 内容中移除指定 Host 块
+     *
+     * @param content config 文件内容
+     * @param hostAlias Host 别名（如 git.woa.com）
+     * @returns 移除后的内容
+     */
+    private removeConfigBlock(content: string, hostAlias: string): string {
+        // 匹配 Host 块：从 `Host xxx` 到下一个 `Host ` 或文件末尾
+        const pattern = new RegExp(
+            `\\n?# ${hostAlias}[\\s\\S]*?Host ${hostAlias.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')}[\\s\\S]*?(?=\\n?#|\\nHost |$)`,
+            'g'
+        )
+        return content.replace(pattern, '').replace(/\n{3,}/g, '\n\n')
+    }
+
+    /**
+     * 移除指定 Host 的 config 块并写回文件
+     */
+    private removeSSHConfigBlock(hostAlias: string): void {
+        if (!existsSync(SSH_CONFIG_PATH)) return
+        const content = readFileSync(SSH_CONFIG_PATH, 'utf-8')
+        if (!content.includes(`Host ${hostAlias}`)) return
+        const updated = this.removeConfigBlock(content, hostAlias)
+        writeFileSync(SSH_CONFIG_PATH, updated, 'utf-8')
+    }
+
+    /**
+     * 删除指定路径的密钥对文件（私钥 + 公钥）
+     */
+    private removeKeyFiles(keyPath: string): void {
+        try {
+            if (existsSync(keyPath)) unlinkSync(keyPath)
+        } catch {
+            // 忽略删除失败
+        }
+        try {
+            const pubPath = `${keyPath}.pub`
+            if (existsSync(pubPath)) unlinkSync(pubPath)
+        } catch {
+            // 忽略删除失败
         }
     }
 
@@ -252,73 +507,78 @@ Host ${hostAlias}
             const errorObj = err as { stdout?: Buffer; stderr?: Buffer }
             const stderr = errorObj.stderr?.toString() || ''
             if (stderr.includes('successfully authenticated')) return 'SSH 连接验证成功'
-            if (stderr.includes('Permission denied')) return 'Permission denied — 请将公钥添加到平台'
+            if (stderr.includes('Permission denied'))
+                return 'Permission denied — 请将公钥添加到平台'
             if (stderr.includes('Connection timed out')) return `连接超时 — 检查网络/端口 ${port}`
             return stderr.slice(0, 200) || '连接测试失败（请将公钥添加到平台）'
         }
     }
 
     /**
-     * 自动上传公钥到 GitLab 兼容平台（工蜂/GitLab/Gitee）
-     * 使用 POST /api/v4/user/keys 接口
+     * 构建 setup 结果的下一步指引
      */
-    private async uploadPublicKey(
-        host: string,
-        pubKey: string,
-        token: string,
-        platform: string
-    ): Promise<boolean> {
-        const apiPath = '/api/v4/user/keys'
-        const title = `nut-git-${platform}-${Date.now()}`
-
-        const postData = JSON.stringify({ title, key: pubKey })
-
-        return new Promise<boolean>((resolve) => {
-            const req = request(
-                {
-                    hostname: host,
-                    port: 443,
-                    path: apiPath,
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Content-Length': Buffer.byteLength(postData),
-                        'PRIVATE-TOKEN': token
-                    },
-                    timeout: 10000
-                },
-                (res) => {
-                    let body = ''
-                    res.on('data', (chunk: Buffer) => { body += chunk.toString() })
-                    res.on('end', () => {
-                        if (res.statusCode === 201 || res.statusCode === 200) {
-                            resolve(true)
-                        } else {
-                            resolve(false)
-                        }
-                    })
-                }
-            )
-            req.on('error', () => resolve(false))
-            req.on('timeout', () => { req.destroy(); resolve(false) })
-            req.write(postData)
-            req.end()
-        })
+    private buildSetupNextSteps(opts: {
+        host: string
+        pubKey: string
+        addKeyUrl?: string
+        uploaded: boolean
+        alreadyExists: boolean
+        uploadError?: string
+        hasToken: boolean
+        skipUpload: boolean
+    }): string[] {
+        if (opts.skipUpload) {
+            return [
+                '⏭️ 已跳过远程公钥上传（skipUpload=true）',
+                '📋 公钥内容（需手动添加到平台）：',
+                opts.pubKey,
+                opts.addKeyUrl ? `🔗 添加地址: ${opts.addKeyUrl}` : '',
+                `✅ 添加后验证: ssh -T git@${opts.host}`
+            ].filter(Boolean)
+        }
+        if (opts.uploaded) {
+            return [`✅ 公钥已自动上传到 ${opts.host}`, `验证: ssh -T git@${opts.host}`]
+        }
+        if (opts.alreadyExists) {
+            return [`ℹ️ 公钥已在平台存在，无需重复上传`, `验证: ssh -T git@${opts.host}`]
+        }
+        if (!opts.hasToken) {
+            return [
+                '⚠️ 未获取到 token（OAuth 授权未完成），公钥未上传',
+                '📋 请手动添加公钥，或先 git.login() 授权后重试：',
+                opts.pubKey,
+                opts.addKeyUrl ? `🔗 添加地址: ${opts.addKeyUrl}` : '',
+                `✅ 添加后验证: ssh -T git@${opts.host}`
+            ].filter(Boolean)
+        }
+        return [
+            `⚠️ 公钥上传失败: ${opts.uploadError || '未知错误'}`,
+            '📋 请手动添加公钥：',
+            opts.pubKey,
+            opts.addKeyUrl ? `🔗 添加地址: ${opts.addKeyUrl}` : '',
+            `✅ 添加后验证: ssh -T git@${opts.host}`
+        ].filter(Boolean)
     }
 
-    /** 构建下一步指引 */
-    private buildNextSteps(host: string, pubKey: string, addKeyUrl?: string): string[] {
-        return [
-            '📋 请将以下公钥添加到平台：',
-            pubKey,
-            addKeyUrl ? `🔗 添加地址: ${addKeyUrl}` : '🔗 请到平台 SSH 设置页面添加',
-            `✅ 添加后验证: ssh -T git@${host}`
-        ]
+    /**
+     * 构建 setup 的结果消息
+     */
+    private buildSetupMessage(opts: {
+        generated: boolean
+        uploaded: boolean
+        alreadyExists: boolean
+        connectionTest: string
+    }): string {
+        const parts: string[] = []
+        parts.push(opts.generated ? '已生成密钥' : '复用已有密钥')
+        if (opts.uploaded) parts.push('公钥已上传')
+        else if (opts.alreadyExists) parts.push('公钥已存在')
+        parts.push(opts.connectionTest)
+        return parts.join(' / ')
     }
 
     /**
      * 诊断 SSH 常见问题
-     * 检查用户指南中的 10 个常见问题
      */
     async troubleshoot(host: string = 'git.woa.com'): Promise<GitResult> {
         const startTime = Date.now()
@@ -360,29 +620,61 @@ Host ${hostAlias}
 
     private checkConfigFile(): SSHTroubleshootCheck {
         if (!existsSync(SSH_CONFIG_PATH)) {
-            return { name: 'config 文件', status: 'fail', message: '不存在', fix: 'touch ~/.ssh/config && chmod 600 ~/.ssh/config' }
+            return {
+                name: 'config 文件',
+                status: 'fail',
+                message: '不存在',
+                fix: 'touch ~/.ssh/config && chmod 600 ~/.ssh/config'
+            }
         }
         return { name: 'config 文件', status: 'pass', message: SSH_CONFIG_PATH }
     }
 
     private checkConfigHost(host: string): SSHTroubleshootCheck {
         if (!existsSync(SSH_CONFIG_PATH)) {
-            return { name: `config 中 ${host}`, status: 'fail', message: 'config 不存在', fix: '先创建 config 文件' }
+            return {
+                name: `config 中 ${host}`,
+                status: 'fail',
+                message: 'config 不存在',
+                fix: '先创建 config 文件'
+            }
         }
         const content = readFileSync(SSH_CONFIG_PATH, 'utf-8')
         if (content.includes(`Host ${host}`) || content.includes(`Host ${host}-`)) {
             return { name: `config 中 ${host}`, status: 'pass', message: '已配置' }
         }
-        return { name: `config 中 ${host}`, status: 'fail', message: '未找到 host 配置', fix: `运行 setup 配置 ${host}` }
+        return {
+            name: `config 中 ${host}`,
+            status: 'fail',
+            message: '未找到 host 配置',
+            fix: `运行 setup 配置 ${host}`
+        }
     }
 
     private checkKeys(): SSHTroubleshootCheck {
-        if (!existsSync(SSH_DIR)) return { name: '密钥文件', status: 'fail', message: '.ssh 目录不存在', fix: '先运行 setup' }
-        const keys = readdirSync(SSH_DIR).filter((f: string) => f.startsWith('id_') && !f.endsWith('.pub'))
+        if (!existsSync(SSH_DIR))
+            return {
+                name: '密钥文件',
+                status: 'fail',
+                message: '.ssh 目录不存在',
+                fix: '先运行 setup'
+            }
+        const keys = readdirSync(SSH_DIR).filter(
+            (f: string) => f.startsWith('id_') && !f.endsWith('.pub')
+        )
         if (keys.length === 0) {
-            return { name: '密钥文件', status: 'fail', message: '无密钥', fix: '运行 setup 生成密钥' }
+            return {
+                name: '密钥文件',
+                status: 'fail',
+                message: '无密钥',
+                fix: '运行 setup 生成密钥'
+            }
         }
-        return { name: '密钥文件', status: 'pass', message: `${keys.length} 个: ${keys.join(', ')}` }
+        return {
+            name: '密钥文件',
+            status: 'pass',
+            message: `${keys.length} 个: ${keys.join(', ')}`
+        }
     }
 
     private checkAgent(): SSHTroubleshootCheck {
@@ -395,7 +687,7 @@ Host ${hostAlias}
                 name: 'ssh-agent',
                 status: 'warn',
                 message: '未运行或无密钥',
-                fix: 'ssh-add ~/.ssh/id_ed25519_platform（问题8: agent refused operation）'
+                fix: 'ssh-add ~/.ssh/id_ed25519_platform'
             }
         }
     }
@@ -404,13 +696,14 @@ Host ${hostAlias}
         try {
             const versionOutput = execSync('ssh -V', { stdio: 'pipe' }).toString()
             const match = versionOutput.match(/OpenSSH_(\d+\.\d+)/)
-            if (!match) return { name: 'OpenSSH 版本', status: 'pass', message: versionOutput.trim() }
+            if (!match)
+                return { name: 'OpenSSH 版本', status: 'pass', message: versionOutput.trim() }
             const ver = parseFloat(match[1])
             if (ver >= 8.8) {
                 return {
                     name: 'OpenSSH 版本',
                     status: 'warn',
-                    message: `v${ver} — 高版本不接受 ssh-rsa（问题2/10）`,
+                    message: `v${ver} — 高版本不接受 ssh-rsa`,
                     fix: 'config 中添加: HostkeyAlgorithms +ssh-rsa（或用 ed25519 密钥）'
                 }
             }
@@ -423,12 +716,14 @@ Host ${hostAlias}
     private checkInsteadOf(): SSHTroubleshootCheck {
         try {
             const output = execSync('git config --list --show-origin', { stdio: 'pipe' }).toString()
-            const insteadOf = output.split('\n').filter((l: string) => l.toLowerCase().includes('insteadof'))
+            const insteadOf = output
+                .split('\n')
+                .filter((l: string) => l.toLowerCase().includes('insteadof'))
             if (insteadOf.length > 0) {
                 return {
                     name: 'git insteadOf',
                     status: 'warn',
-                    message: `发现 ${insteadOf.length} 条强转配置（问题7）`,
+                    message: `发现 ${insteadOf.length} 条强转配置`,
                     fix: '检查 git config --list --show-origin | grep insteadOf，删除相关配置'
                 }
             }
@@ -441,7 +736,8 @@ Host ${hostAlias}
     private checkConnection(host: string): SSHTroubleshootCheck {
         try {
             execSync(`ssh -T -o BatchMode=yes -o ConnectTimeout=5 git@${host}`, {
-                stdio: 'pipe', timeout: 10000
+                stdio: 'pipe',
+                timeout: 10000
             })
             return { name: 'SSH 连接', status: 'pass', message: '连接成功' }
         } catch (err: unknown) {
@@ -451,10 +747,20 @@ Host ${hostAlias}
                 return { name: 'SSH 连接', status: 'pass', message: '认证成功' }
             }
             if (stderr.includes('Permission denied')) {
-                return { name: 'SSH 连接', status: 'fail', message: 'Permission denied（问题2）', fix: '检查公钥是否已添加到平台' }
+                return {
+                    name: 'SSH 连接',
+                    status: 'fail',
+                    message: 'Permission denied',
+                    fix: '检查公钥是否已添加到平台'
+                }
             }
             if (stderr.includes('timed out') || stderr.includes('Connection timed out')) {
-                return { name: 'SSH 连接', status: 'fail', message: '连接超时（问题3/6）', fix: '检查网络策略/是否在 StaffWifi' }
+                return {
+                    name: 'SSH 连接',
+                    status: 'fail',
+                    message: '连接超时',
+                    fix: '检查网络策略/是否在 StaffWifi'
+                }
             }
             return { name: 'SSH 连接', status: 'warn', message: stderr.slice(0, 150) || '测试失败' }
         }
@@ -469,7 +775,9 @@ Host ${hostAlias}
             const sshDirExists = existsSync(SSH_DIR)
             const configExists = existsSync(SSH_CONFIG_PATH)
             const keys = sshDirExists
-                ? readdirSync(SSH_DIR).filter((f: string) => !f.endsWith('.pub') && f.startsWith('id_'))
+                ? readdirSync(SSH_DIR).filter(
+                      (f: string) => !f.endsWith('.pub') && f.startsWith('id_')
+                  )
                 : []
 
             let agentRunning = false
@@ -490,14 +798,20 @@ Host ${hostAlias}
                     sshDir: sshDirExists,
                     sshConfig: configExists,
                     keys,
-                    configContent: configExists ? readFileSync(SSH_CONFIG_PATH, 'utf-8').slice(0, 2000) : null,
+                    configContent: configExists
+                        ? readFileSync(SSH_CONFIG_PATH, 'utf-8').slice(0, 2000)
+                        : null,
                     sshAgent: { running: agentRunning, loadedKeys }
                 },
                 duration: Date.now() - startTime,
                 summary: { keysCount: keys.length, agentRunning, configExists }
             }
         } catch (error) {
-            return this.failResult(startTime, '获取状态失败', (error as Error).message)
+            return this.failResult(
+                startTime,
+                '获取状态失败',
+                error instanceof Error ? error.message : String(error)
+            )
         }
     }
 
@@ -507,48 +821,117 @@ Host ${hostAlias}
     async showPublicKey(hostOrPlatform: string = 'github'): Promise<GitResult> {
         const startTime = Date.now()
         try {
-            const candidates = [
-                join(SSH_DIR, `id_ed25519_${hostOrPlatform}.pub`),
-                join(SSH_DIR, `id_rsa_${hostOrPlatform}.pub`),
-                join(SSH_DIR, 'id_ed25519.pub'),
-                join(SSH_DIR, 'id_rsa.pub')
-            ]
-
-            let pubKeyPath = ''
-            for (const c of candidates) {
-                if (existsSync(c)) { pubKeyPath = c; break }
-            }
-
-            if (!pubKeyPath && existsSync(SSH_DIR) && existsSync(SSH_CONFIG_PATH)) {
-                // 按 host 在 config 里找 IdentityFile
-                const config = readFileSync(SSH_CONFIG_PATH, 'utf-8')
-                const match = config.match(new RegExp(`Host ${hostOrPlatform}[\\s\\S]*?IdentityFile\\s+(\\S+)`))
-                if (match) {
-                    const keyFromConfig = match[1]
-                    const pubCandidate = `${keyFromConfig}.pub`
-                    if (existsSync(pubCandidate)) pubKeyPath = pubCandidate
-                }
-            }
+            const pubKeyPath = findPubKeyPath(hostOrPlatform)
 
             if (!pubKeyPath) {
-                return this.failResult(startTime, `未找到 ${hostOrPlatform} 的公钥`, 'KEY_NOT_FOUND')
+                return this.failResult(
+                    startTime,
+                    `未找到 ${hostOrPlatform} 的公钥`,
+                    'KEY_NOT_FOUND'
+                )
             }
 
             const pubKey = readFileSync(pubKeyPath, 'utf-8').trim()
-            return this.successResult(startTime, { platform: hostOrPlatform, keyPath: pubKeyPath, publicKey: pubKey })
+            return this.successResult(startTime, {
+                platform: hostOrPlatform,
+                keyPath: pubKeyPath,
+                publicKey: pubKey
+            })
         } catch (error) {
-            return this.failResult(startTime, '读取公钥失败', (error as Error).message)
+            return this.failResult(
+                startTime,
+                '读取公钥失败',
+                error instanceof Error ? error.message : String(error)
+            )
+        }
+    }
+
+    /**
+     * 清理本地 SSH 配置（密钥文件 + config 块）
+     *
+     * 删除指定平台的密钥对，并从 ~/.ssh/config 移除对应 Host 块。
+     * 不删除远程平台上的公钥（如需删除远程 Key，用 ssh-remote 的 deleteKey）。
+     *
+     * @param platform 平台名（如 gitcode）；默认 gitcode
+     * @param account 多帐号标识（可选）
+     */
+    async clean(platform: string = 'gitcode', account?: string): Promise<GitResult> {
+        const startTime = Date.now()
+        try {
+            const { hostAlias, keyCandidates } = resolveCleanContext(platform, account)
+
+            const removedFiles = this.removeKeyFilesFromList(keyCandidates)
+            const configRemoved = this.tryRemoveConfigBlock(hostAlias)
+            this.removeFromAgent(keyCandidates)
+
+            return {
+                success: true,
+                operation: 'stage',
+                message: `已清理 ${platform} SSH 配置: ${removedFiles.length} 个密钥文件${configRemoved ? ' + config 块' : ''}`,
+                data: { platform, hostAlias, removedFiles, configRemoved },
+                duration: Date.now() - startTime
+            }
+        } catch (error) {
+            return this.failResult(
+                startTime,
+                '清理 SSH 配置失败',
+                error instanceof Error ? error.message : String(error)
+            )
+        }
+    }
+
+    /** 批量删除密钥文件 */
+    private removeKeyFilesFromList(keyPaths: string[]): string[] {
+        const removedFiles: string[] = []
+        for (const keyPath of keyPaths) {
+            if (existsSync(keyPath)) {
+                this.removeKeyFiles(keyPath)
+                removedFiles.push(keyPath)
+            }
+        }
+        return removedFiles
+    }
+
+    /** 尝试从 SSH config 移除 Host 块 */
+    private tryRemoveConfigBlock(hostAlias: string): boolean {
+        if (!existsSync(SSH_CONFIG_PATH)) return false
+        if (!readFileSync(SSH_CONFIG_PATH, 'utf-8').includes(`Host ${hostAlias}`)) return false
+
+        this.removeSSHConfigBlock(hostAlias)
+        return true
+    }
+
+    /** 从 ssh-agent 移除密钥（忽略失败） */
+    private removeFromAgent(keyPaths: string[]): void {
+        for (const keyPath of keyPaths) {
+            try {
+                execSync(`ssh-add -d "${keyPath}"`, { stdio: 'pipe' })
+            } catch {
+                // 密钥可能未加载，忽略
+            }
         }
     }
 
     // ==================== 内部工具 ====================
 
     private successResult(startTime: number, data: Record<string, unknown>): GitResult {
-        return { success: true, operation: 'stage', message: 'SSH 操作成功', data, duration: Date.now() - startTime }
+        return {
+            success: true,
+            operation: 'stage',
+            message: 'SSH 操作成功',
+            data,
+            duration: Date.now() - startTime
+        }
     }
 
     private failResult(startTime: number, message: string, error: string): GitResult {
-        return { success: false, operation: 'stage', message, error, duration: Date.now() - startTime }
+        return {
+            success: false,
+            operation: 'stage',
+            message,
+            error,
+            duration: Date.now() - startTime
+        }
     }
 }
 
@@ -575,6 +958,11 @@ export async function checkSSHStatus(): Promise<GitResult> {
 
 export async function showSSHKey(hostOrPlatform?: string): Promise<GitResult> {
     return new SSHManager().showPublicKey(hostOrPlatform || 'github')
+}
+
+/** 清理本地 SSH 配置（密钥文件 + config 块） */
+export async function cleanSSH(platform?: string, account?: string): Promise<GitResult> {
+    return new SSHManager().clean(platform, account)
 }
 
 export default SSHManager

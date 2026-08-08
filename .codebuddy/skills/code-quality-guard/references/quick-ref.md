@@ -63,18 +63,15 @@
 ## 命令行快速参考
 
 ```bash
-# Prettier 格式化
-npx nut-lint format <file>
+# Prettier 格式化（nut 无 format 子命令，直调 prettier）
+npx prettier --write <file>
 
 # 格式化+lint 修复（Prettier → ESLint → Stylelint）
-npx nut-lint fix <file> --write
+npx nut lint fix <file> --write
 
-# 验证（Prettier + ESLint + Stylelint + tsc）
-npx nut-lint run <file>
-
-# 仅检查不修复
-npx nut-lint check <file>
+# 验证（Prettier + ESLint + Stylelint + tsc），run 本身就是检查
+npx nut lint run <file>
 
 # 仅 TS 类型检查
-npx nut-lint run <file> --source typescript
+npx tsc --noEmit
 ```

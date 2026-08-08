@@ -70,14 +70,14 @@ src/
   ├── Props 接收 + JSX 输出
   └── ≤ 200 行（推荐），最多 360 行
 
-Hook 文件（hook.ts）：
+Hook 文件（hook.ts / use-xxx.ts）：
   ├── 数据获取（useQuery / fetch）
   ├── 状态管理（useState / useReducer）
   ├── 副作用编排（useEffect）
   ├── 事件处理函数（handle*）
   └── 返回：{ data, loading, error, handlers }
 
-工具文件（util.ts）：
+工具文件（util.ts / utils.ts）：
   ├── 纯函数（无副作用）
   ├── 数据转换（API Response → UI Model）
   ├── 格式化（日期/金额/状态码映射）
@@ -89,6 +89,43 @@ Hook 文件（hook.ts）：
   ├── 内部状态类型
   ├── 事件回调类型
   └── 注意：公共业务类型从 @/types 导入，不重复定义
+```
+
+### 2.1 函数分类边界表（v2.1 新增·写代码前必须对照）
+
+```
+写代码前必须用此表判定每个函数的文件归属，禁止混放：
+
+┌──────────────────────────────────────────────────────────────────────┐
+│ 函数特征                           │ 归属文件        │ 判定标准      │
+├──────────────────────────────────────────────────────────────────────┤
+│ 不依赖 React hooks/组件状态        │ utils.ts        │ 纯输入→输出   │
+│ 例：formatDate, transformResponse, │                 │ 可独立测试    │
+│     validateEmail, calcDiscount    │                 │ 无副作用      │
+├──────────────────────────────────────────────────────────────────────┤
+│ 包含 fetch/axios/请求逻辑         │ api/ 或          │ 网络IO操作    │
+│ 例：fetchUserList, updateUser,     │ services/       │ 请求-响应映射 │
+│     deleteCategory                 │                 │               │
+├──────────────────────────────────────────────────────────────────────┤
+│ 使用 useState/useEffect/useRef     │ hooks/use-xxx.ts│ 依赖 React    │
+│ 例：useUserList, useFormState,     │ 或 hook.ts      │ 生命周期      │
+│     useDebounce, useModalState     │                 │ 返回状态+方法 │
+├──────────────────────────────────────────────────────────────────────┤
+│ JSX 组装/条件渲染/组件组合         │ index.tsx       │ 纯渲染编排    │
+│ 例：<UserTable>, <FilterBar>,      │                 │ 不含业务逻辑  │
+│     三态判断 if(loading/error/data) │                 │               │
+├──────────────────────────────────────────────────────────────────────┤
+│ 接口响应→前端模型的适配转换        │ api/adapters/   │ 解耦后端字段  │
+│ 例：adaptUserResponse,             │ 或 api/xxx.ts   │ 和前端展示    │
+│     normalizeTreeData              │                 │               │
+└──────────────────────────────────────────────────────────────────────┘
+
+🔴 自检规则（写完代码后必须验证）：
+  □ index.tsx 中是否有纯计算函数？→ 移到 utils.ts
+  □ index.tsx 中是否有 fetch/axios？→ 移到 api/ 或 hook.ts
+  □ hook.ts 中是否有不依赖 hooks 的纯函数？→ 移到 utils.ts
+  □ 同一功能是否在多处重复实现？→ 提取到公共 utils/ 或 hooks/
+  □ 超过 5 行的数据加工逻辑是否在 index.tsx 中？→ 移到 utils.ts
 ```
 
 ---

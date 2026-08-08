@@ -23,6 +23,7 @@ module.exports = {
         semi: ['error', 'never'],
         'no-control-regex': 0,
         complexity: ['error', 10],
+        'no-nested-ternary': 'error',
         'no-restricted-syntax': [
             'error',
             {
@@ -34,5 +35,21 @@ module.exports = {
                 message: '禁止使用 eslint-disable 注释。有问题应从根本上修复，而非抑制警告。'
             }
         ]
-    }
+    },
+    overrides: [
+        {
+            // 度量脚本天然多分支（AST 遍历/状态机/多类检测），放宽复杂度限制
+            files: ['src/ads/metrics/**/*.ts'],
+            rules: {
+                complexity: ['error', 30]
+            }
+        },
+        {
+            // CLI 入口天然多分支（命令分发/参数解析），放宽复杂度限制
+            files: ['src/cli/**/*.ts'],
+            rules: {
+                complexity: ['error', 20]
+            }
+        }
+    ]
 }

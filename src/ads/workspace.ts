@@ -13,14 +13,7 @@
  *   - gcScratch  按 mtime 超期回收残留目录（防进程崩溃残留）
  */
 
-import {
-    existsSync,
-    mkdirSync,
-    rmSync,
-    readdirSync,
-    statSync,
-    writeFileSync
-} from 'node:fs'
+import { existsSync, mkdirSync, rmSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 
@@ -29,7 +22,10 @@ const DEFAULT_GC_HOURS = 72
 
 /** 生成任务 ID（时间戳前缀 + 短随机，便于人类排序 + 唯一） */
 export function generateTaskId(): string {
-    const ts = new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 14)
+    const ts = new Date()
+        .toISOString()
+        .replace(/[-:.TZ]/g, '')
+        .slice(0, 14)
     return `${ts}-${randomUUID().slice(0, 8)}`
 }
 

@@ -175,7 +175,7 @@ fresh 校验基准：attemptStartedAt（而非 startedAt）
 
 ```
 ┌─────────────────────────────────────────────┐
-│  CLI (src/cli/ads.ts)  —  nut-ads 命令行入口   │
+│  CLI (src/cli/ads.ts)  —  nut ads 命令行入口   │
 │  init / next / status / check / retry /       │
 │  reset / gc / subtask-add / subtask-done/emit │
 └───────────────────┬─────────────────────────┘
@@ -203,7 +203,7 @@ fresh 校验基准：attemptStartedAt（而非 startedAt）
 | `verify.ts` | 验证器：schema / lint / tsc / build / test / custom / producesFresh |
 | `workspace.ts` | scratch 目录分配 / tmpFile / cleanup / GC |
 | `index.ts` | `Ads` 类，对外统一 API |
-| `cli/ads.ts` | `nut-ads` 命令行，Skill 与引擎交互的入口 |
+| `cli/ads.ts` | `nut ads` 命令行，Skill 与引擎交互的入口 |
 
 ---
 
@@ -248,31 +248,31 @@ Skill 作者不写任何执行逻辑，只声明一份 manifest：
 
 ```bash
 # 初始化任务（自动建 scratch + GC 残留）
-nut-ads init <manifest> --task "实现用户列表页"
+nut ads init <manifest> --task "实现用户列表页"
 
 # 推进（内部强制验证 + 子任务闭环 + artifact 校验 + 熔断）
-nut-ads next <manifest>
+nut ads next <manifest>
 
 # 断线恢复：查看当前在哪一步
-nut-ads status <manifest>
+nut ads status <manifest>
 
 # 手动验证当前阶段（不推进）
-nut-ads check <manifest>
+nut ads check <manifest>
 
 # 重做前刷新 fresh 基准（断点续跑）
-nut-ads retry <manifest>
+nut ads retry <manifest>
 
 # 动态拆子任务 / 完成子任务
-nut-ads subtask-add  <manifest> --desc "实现列表分页" [--id x] [--produces "a,b"]
-nut-ads subtask-done <manifest> --id design-sub-1
+nut ads subtask-add  <manifest> --desc "实现列表分页" [--id x] [--produces "a,b"]
+nut ads subtask-done <manifest> --id design-sub-1
 
 # 阶段间传数据
-nut-ads emit <manifest> --key frontendPlan --kind file  --path artifacts/api.json
-nut-ads emit <manifest> --key config       --kind value --value '{"a":1}'
+nut ads emit <manifest> --key frontendPlan --kind file  --path artifacts/api.json
+nut ads emit <manifest> --key config       --kind value --value '{"a":1}'
 
 # 重置 / 回收过期临时目录
-nut-ads reset <manifest>
-nut-ads gc    <manifest>
+nut ads reset <manifest>
+nut ads gc    <manifest>
 ```
 
 ---

@@ -9,13 +9,19 @@ import type { RollupOptions } from 'rollup'
 import { defineConfig } from 'rollup'
 import del from 'rollup-plugin-delete'
 import { dts } from 'rollup-plugin-dts'
+import terser from '@rollup/plugin-terser'
 
 const __dirname = resolve()
+
+// ==================== 环境检测 ====================
+
+const isProd = process.env.NODE_ENV === 'production'
 
 // ==================== 入口配置 ====================
 
 const entries = {
-    // CLI 入口
+    // CLI 入口（统一 nut 命令）
+    cli: './src/cli/index.ts',
     lint: './src/cli/lint.ts',
     git: './src/cli/git.ts',
     'ads-cli': './src/cli/ads.ts',
@@ -25,7 +31,7 @@ const entries = {
 
 // ==================== 需要添加 shebang 的文件 ====================
 
-const cliFiles = ['lint', 'git', 'ads-cli']
+const cliFiles = ['cli', 'lint', 'git', 'ads-cli']
 
 // ==================== JS/TS 打包配置 ====================
 
@@ -91,7 +97,21 @@ export default [
                 tsconfig: './tsconfig.json',
                 exclude: ['node_modules']
             }),
-            json()
+            json(),
+            // 生产环境压缩代码，开发环境不压缩保持可读性
+            isProd &&
+                terser({
+                    compress: {
+                        drop_console: false,
+                        drop_debugger: true,
+                        pure_funcs: []
+                    },
+                    format: {
+                        comments: false
+                    },
+                    mangle: true,
+                    toplevel: true
+                })
         ],
         onwarn: (warning, warn) => {
             if (warning.message.includes('Circular dependency') || warning.code === 'EVAL') {

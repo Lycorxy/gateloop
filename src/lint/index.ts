@@ -106,8 +106,28 @@ export { runESLint, runStylelint, runTypeScript, runLint }
 // 导入 Lint 修复器
 import { fixESLint, fixStylelint, fixTypeScript, fixLint, formatAndFix } from './fixer'
 
-// 导出 Lint 修复器
+// 导入 Lint 修复器
 export { fixESLint, fixStylelint, fixTypeScript, fixLint, formatAndFix }
+
+// 导入独立验证器（不依赖 ESLint 配置）
+import { checkFileSize } from './file-size'
+import type { FileSizeConfig, FileSizeResult, FileSizeViolation } from './file-size'
+import { runPrettierCheck, runPrettierFormat } from './prettier-check'
+import type { PrettierCheckResult } from './prettier-check'
+import { checkFileNaming } from './check-file-naming'
+import type { NamingConfig, NamingResult, NamingViolation } from './check-file-naming'
+
+// 导出独立验证器
+export { checkFileSize, runPrettierCheck, runPrettierFormat, checkFileNaming }
+export type {
+    FileSizeConfig,
+    FileSizeResult,
+    FileSizeViolation,
+    PrettierCheckResult,
+    NamingConfig,
+    NamingResult,
+    NamingViolation
+}
 
 // 导出快捷函数
 export async function lint(

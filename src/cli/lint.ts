@@ -6,12 +6,11 @@
 
 import { existsSync, statSync } from 'node:fs'
 import type { RuleSource, GenerateKnowledgeInput, LintInput, FixInput } from '../lint/types'
-import { extractAllRules, generateKnowledgeBase, runLint, fixLint, detectLintConfig } from '../lint'
+import { extractAllRules, generateKnowledgeBase, runLint as runLintEngine, fixLint, detectLintConfig, checkFileNaming } from '../lint'
 
 // ==================== 主函数 ====================
 
-async function main() {
-    const args = process.argv.slice(2)
+export async function runLint(args: string[]): Promise<void> {
     const command = args[0]
 
     if (!command || command === '--help' || command === '-h') {
@@ -39,6 +38,10 @@ async function main() {
 
             case 'config':
                 await handleConfig(args.slice(1))
+                break
+
+            case 'check-naming':
+                handleCheckNaming(args.slice(1))
                 break
 
             default:
@@ -126,7 +129,7 @@ async function handleRun(args: string[]) {
 
     const patterns = getPatterns(options)
     if (patterns.length === 0) {
-        console.error('请提供文件模式，例如: nut_lint run "src/**/*.ts"')
+        console.error('请提供文件模式，例如: nut lint run "src/**/*.ts"')
         process.exit(1)
     }
 
@@ -142,7 +145,7 @@ async function handleRun(args: string[]) {
         progress: options.progress === 'true'
     }
 
-    const result = await runLint(input)
+    const result = await runLintEngine(input)
 
     // 输出详细问题（ESLint 默认格式）
     if (result.totalIssues > 0) {
@@ -158,7 +161,7 @@ async function handleRun(args: string[]) {
 
     console.log(`\n✖ ${result.totalIssues} problems (${result.totalErrors} errors, ${result.totalWarnings} warnings)`)
     if (result.fixableIssues > 0) {
-        console.log(`  ${result.fixableIssues} errors and ${result.fixableIssues} warnings potentially fixable with \`nut_lint fix\` command`)
+        console.log(`  ${result.fixableIssues} errors and ${result.fixableIssues} warnings potentially fixable with \`nut lint fix\` command`)
     }
 
     console.log('\n✅ 验证完成')
@@ -176,7 +179,7 @@ async function handleFix(args: string[]) {
 
     const patterns = getPatterns(options)
     if (patterns.length === 0) {
-        console.error('请提供文件模式，例如: nut_lint fix "src/**/*.ts" --write')
+        console.error('请提供文件模式，例如: nut lint fix "src/**/*.ts" --write')
         process.exit(1)
     }
 
@@ -215,7 +218,7 @@ async function handleFix(args: string[]) {
             cwd: options.cwd,
             source: options.source as RuleSource | undefined
         }
-        const verifyResult = await runLint(verifyInput)
+        const verifyResult = await runLintEngine(verifyInput)
 
         if (verifyResult.totalIssues > 0) {
             for (const fileResult of verifyResult.results) {
@@ -336,6 +339,47 @@ function expandPatterns(patterns: string[]): string[] {
 }
 
 /**
+ * 处理文件命名规范检查命令
+ *
+ * 用法：nut lint check-naming <patterns...>
+ *   nut lint check-naming "src/components/*.ts"
+ *   nut lint check-naming src/components
+ */
+function handleCheckNaming(args: string[]) {
+    const options = parseOptions(args)
+    const patterns = getPatterns(options)
+
+    if (patterns.length === 0) {
+        console.error('请提供要检查的文件或目录')
+        console.error('示例: nut lint check-naming "src/**/*.{ts,tsx}"')
+        process.exit(1)
+    }
+
+    const expanded = expandPatterns(patterns).filter(p =>
+        /\.(ts|tsx|js|jsx)$/.test(p) || p.includes('*')
+    )
+
+    if (expanded.length === 0) {
+        console.error('未匹配到 .ts/.tsx 文件')
+        process.exit(1)
+    }
+
+    const result = checkFileNaming(expanded, options.cwd || process.cwd())
+
+    if (result.passed) {
+        console.log(`✓ 文件命名规范检查通过 (${result.checkedFiles} 文件)`)
+        return
+    }
+
+    console.log(`✖ ${result.violations.length} 个命名违规:`)
+    for (const v of result.violations) {
+        console.log(`  ❌ ${v.message}`)
+    }
+    console.log(`\n✖ ${result.violations.length} problems`)
+    process.exit(1)
+}
+
+/**
  * 打印帮助信息
  */
 function printHelp() {
@@ -343,14 +387,15 @@ function printHelp() {
 🔧 Lint 工具 - 命令行接口
 
 用法:
-  nut_lint <命令> [选项] <patterns...>
+  nut lint <命令> [选项] <patterns...>
 
 命令:
-  extract     提取 ESLint 和 Stylelint 规则
-  knowledge   生成规则知识库
-  run         执行 Lint 验证
-  fix         修复 Lint 错误
-  config      检测项目 Lint 配置
+  extract        提取 ESLint 和 Stylelint 规则
+  knowledge      生成规则知识库
+  run            执行 Lint 验证
+  fix            修复 Lint 错误
+  config         检测项目 Lint 配置
+  check-naming   文件命名规范检查（kebab-case / 单一导出 / Hook 命名）
 
 选项:
   --cwd <path>        工作目录
@@ -374,29 +419,31 @@ patterns:
 
 示例:
   # 提取所有规则
-  nut_lint extract
+  nut lint extract
 
   # 生成知识库
-  nut_lint knowledge --source eslint
+  nut lint knowledge --source eslint
 
   # 验证单文件
-  nut_lint run src/index.ts
+  nut lint run src/index.ts
 
   # 验证多文件
-  nut_lint run src/index.ts src/types.ts
+  nut lint run src/index.ts src/types.ts
 
   # 验证目录
-  nut_lint run src/helpers
+  nut lint run src/helpers
 
   # 验证 glob
-  nut_lint run "src/**/*.ts"
+  nut lint run "src/**/*.ts"
 
   # 修复错误
-  nut_lint fix src/index.ts --write
-  nut_lint fix src/helpers --write
+  nut lint fix src/index.ts --write
+  nut lint fix src/helpers --write
+
+  # 文件命名规范检查（收敛型门禁）
+  nut lint check-naming "src/**/*.{ts,tsx}"
+  nut lint check-naming src/components
 `)
 }
 
 // ==================== 入口 ====================
-
-main()

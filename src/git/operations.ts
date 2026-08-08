@@ -5,7 +5,7 @@
  * 每个操作前自动创建快照，确保可以安全回退
  */
 
-import { gitExecOrThrow, gitExecLines, getCurrentBranch, getStagedFiles } from './executor'
+import { gitExec, gitExecOrThrow, gitExecLines, getCurrentBranch, getStagedFiles } from './executor'
 import { SnapshotManager } from './backup'
 import { checkAndFixLineEndings } from './line-ending'
 import type {
@@ -83,6 +83,13 @@ function errorResult(
 
 // ==================== Git 操作管理器 ====================
 
+/** 构建 git add 参数；返回 string 表示错误消息 */
+function buildStageArgs(all: boolean, files?: string[]): string[] | string {
+    if (all) return ['add', '--all']
+    if (files && files.length > 0) return ['add', '--', ...files]
+    return '请指定要暂存的文件或使用 --all'
+}
+
 /**
  * Git 操作管理器
  */
@@ -113,7 +120,7 @@ export class GitOperator {
             return await this.snapshotManager.createSnapshot(operation, {
                 description: description || `[SAFETY-NET] ${operation} 操作前完整备份`,
                 includeUnstaged: true,
-                includeUntracked: true  // ✅ 默认也保存未跟踪文件
+                includeUntracked: true // ✅ 默认也保存未跟踪文件
             })
         } catch {
             return null
@@ -216,11 +223,9 @@ export class GitOperator {
         const startTime = Date.now()
         const { files, all = false, fixLineEndings = false, lineEnding } = options
 
-        // 自动备份
         await this.preBackup('stage', files?.length ? `暂存 ${files.join(', ')}` : '暂存所有文件')
 
         try {
-            // 处理行尾符
             if (fixLineEndings) {
                 const fixResult = await checkAndFixLineEndings(this.cwd, {
                     expected: lineEnding || 'lf',
@@ -236,24 +241,12 @@ export class GitOperator {
                 }
             }
 
-            const args: string[] = ['add']
-
-            if (all) {
-                args.push('--all')
-            } else if (files && files.length > 0) {
-                args.push('--')
-                args.push(...files)
-            } else {
-                return errorResult(
-                    'stage',
-                    '请指定要暂存的文件或使用 --all',
-                    'NO_FILES',
-                    Date.now() - startTime
-                )
+            const args = buildStageArgs(all, files)
+            if (typeof args === 'string') {
+                return errorResult('stage', args, 'NO_FILES', Date.now() - startTime)
             }
 
             await gitExecOrThrow(args, { cwd: this.cwd })
-
             const stagedFiles = await getStagedFiles(this.cwd)
 
             return successResult(
@@ -858,6 +851,269 @@ export class GitOperator {
         }
         const target = Math.max(0, current.index - 1)
         return this.restoreToIndex(target)
+    }
+
+    // ==================== 远程同步操作 ====================
+
+    /**
+     * 拉取远程代码（git pull）
+     */
+    async pull(): Promise<GitResult> {
+        const startTime = Date.now()
+        await this.preBackup('checkout', '拉取远程代码')
+        try {
+            await gitExecOrThrow(['pull'], { cwd: this.cwd })
+            return successResult(
+                'checkout',
+                '已拉取最新代码',
+                undefined,
+                undefined,
+                Date.now() - startTime
+            )
+        } catch (error) {
+            return errorResult(
+                'checkout',
+                '拉取代码失败',
+                (error as Error).message,
+                Date.now() - startTime
+            )
+        }
+    }
+
+    /**
+     * 推送当前分支到远程（git push）
+     */
+    async push(): Promise<GitResult> {
+        const startTime = Date.now()
+        await this.preBackup('checkout', '推送到远程')
+        try {
+            await gitExecOrThrow(['push'], { cwd: this.cwd })
+            return successResult(
+                'checkout',
+                '已推送到远程',
+                undefined,
+                undefined,
+                Date.now() - startTime
+            )
+        } catch (error) {
+            return errorResult(
+                'checkout',
+                '推送失败',
+                (error as Error).message,
+                Date.now() - startTime
+            )
+        }
+    }
+
+    /**
+     * 强制推送当前分支到目标分支
+     *
+     * @param targetBranch 目标分支名
+     */
+    async forcePushToBranch(targetBranch: string): Promise<GitResult> {
+        const startTime = Date.now()
+        validateBranchName(targetBranch)
+        await this.preBackup('checkout', `强推到 ${targetBranch}`)
+
+        try {
+            const currentBranch = await getCurrentBranch(this.cwd)
+            await gitExecOrThrow(['push', 'origin', `${currentBranch}:${targetBranch}`, '-f'], {
+                cwd: this.cwd
+            })
+            return successResult(
+                'checkout',
+                `已将 ${currentBranch} 强制推送到 ${targetBranch}`,
+                { source: currentBranch, target: targetBranch },
+                undefined,
+                Date.now() - startTime
+            )
+        } catch (error) {
+            return errorResult(
+                'checkout',
+                '强制推送失败',
+                (error as Error).message,
+                Date.now() - startTime
+            )
+        }
+    }
+
+    /**
+     * 合并分支（带冲突检测）
+     *
+     * @param branchName 要合并的分支名
+     * @returns 含 hasConflict 标志，冲突时不抛异常
+     */
+    async merge(branchName: string): Promise<GitResult> {
+        const startTime = Date.now()
+        validateBranchName(branchName)
+        await this.preBackup('merge', `合并 ${branchName}`)
+
+        try {
+            const r = await gitExec(['merge', branchName], { cwd: this.cwd })
+            if (r.success) {
+                return successResult(
+                    'merge',
+                    `已合并 ${branchName}`,
+                    { branch: branchName, hasConflict: false },
+                    undefined,
+                    Date.now() - startTime
+                )
+            }
+            // 检测冲突
+            const hasConflict =
+                r.stderr.includes('CONFLICT') || r.stderr.includes('Automatic merge failed')
+            if (hasConflict) {
+                // 有冲突时中止合并，让用户手动处理
+                try {
+                    await gitExecOrThrow(['merge', '--abort'], { cwd: this.cwd })
+                } catch {
+                    // 忽略
+                }
+            }
+            return errorResult(
+                'merge',
+                hasConflict ? '合并存在冲突，请手动解决' : r.stderr || '合并失败',
+                hasConflict ? 'CONFLICT' : 'MERGE_FAILED',
+                Date.now() - startTime
+            )
+        } catch (error) {
+            return errorResult(
+                'merge',
+                '合并失败',
+                (error as Error).message,
+                Date.now() - startTime
+            )
+        }
+    }
+
+    /**
+     * 删除远程分支
+     *
+     * 走 SSH/HTTPS，不需要 API token。
+     *
+     * @param branchName 远程分支名
+     */
+    async deleteRemoteBranch(branchName: string): Promise<GitResult> {
+        const startTime = Date.now()
+        validateBranchName(branchName)
+        await this.preBackup('branch', `删除远程分支 ${branchName}`)
+
+        try {
+            await gitExecOrThrow(['push', 'origin', '--delete', branchName], { cwd: this.cwd })
+            return successResult(
+                'branch',
+                `已删除远程分支: ${branchName}`,
+                { branch: branchName },
+                undefined,
+                Date.now() - startTime
+            )
+        } catch (error) {
+            return errorResult(
+                'branch',
+                '删除远程分支失败',
+                (error as Error).message,
+                Date.now() - startTime
+            )
+        }
+    }
+
+    /**
+     * 同步 master 分支到当前分支
+     *
+     * 流程：stash → checkout master → pull → checkout back → merge master → stash pop
+     * 冲突时自动中止合并并提示用户手动处理。
+     */
+    async syncWithMaster(): Promise<GitResult> {
+        const startTime = Date.now()
+        const currentBranch = await getCurrentBranch(this.cwd)
+
+        if (currentBranch === 'master') {
+            const pullResult = await this.pull()
+            return {
+                ...pullResult,
+                message: pullResult.success ? '已拉取 master 最新代码' : pullResult.message,
+                duration: Date.now() - startTime
+            }
+        }
+
+        await this.preBackup('merge', `同步 master 到 ${currentBranch}`)
+
+        try {
+            const didStash = await this.stashChangesIfNeeded()
+
+            await this.switchToMasterAndPull(currentBranch)
+
+            const mergeResult = await gitExec(['merge', 'master'], { cwd: this.cwd })
+            if (!mergeResult.success) {
+                return this.handleMergeFailure(mergeResult, didStash, startTime)
+            }
+
+            if (didStash) await gitExec(['stash', 'pop'], { cwd: this.cwd })
+
+            return successResult(
+                'merge',
+                `已同步 master 最新代码到 ${currentBranch}`,
+                { branch: currentBranch },
+                undefined,
+                Date.now() - startTime
+            )
+        } catch (error) {
+            return errorResult(
+                'merge',
+                '同步 master 失败',
+                (error as Error).message,
+                Date.now() - startTime
+            )
+        }
+    }
+
+    /** 如果有未提交更改则 stash */
+    private async stashChangesIfNeeded(): Promise<boolean> {
+        const statusResult = await gitExec(['status', '--porcelain'], { cwd: this.cwd })
+        const hasChanges = statusResult.success && statusResult.stdout.trim().length > 0
+        if (!hasChanges) return false
+
+        const stashResult = await gitExec(['stash', 'push', '-m', 'auto-sync-master'], {
+            cwd: this.cwd
+        })
+        return stashResult.success && !stashResult.stdout.includes('No local changes')
+    }
+
+    /** 切到 master 拉取后切回原分支 */
+    private async switchToMasterAndPull(currentBranch: string): Promise<void> {
+        await gitExecOrThrow(['checkout', 'master'], { cwd: this.cwd })
+        await gitExecOrThrow(['pull'], { cwd: this.cwd })
+        await gitExecOrThrow(['checkout', currentBranch], { cwd: this.cwd })
+    }
+
+    /** 处理合并失败：检测冲突 → abort → 还原 stash → 返回错误 */
+    private async handleMergeFailure(
+        mergeResult: { stderr: string },
+        didStash: boolean,
+        startTime: number
+    ): Promise<GitResult> {
+        const hasConflict =
+            mergeResult.stderr.includes('CONFLICT') ||
+            mergeResult.stderr.includes('Automatic merge failed')
+
+        if (hasConflict) {
+            try {
+                await gitExecOrThrow(['merge', '--abort'], { cwd: this.cwd })
+            } catch {
+                // 忽略
+            }
+        }
+
+        if (didStash) await gitExec(['stash', 'pop'], { cwd: this.cwd })
+
+        return errorResult(
+            'merge',
+            hasConflict
+                ? '合并 master 存在冲突，请手动执行: git merge master → 解决冲突 → git add . && git commit'
+                : '合并 master 失败',
+            hasConflict ? 'CONFLICT' : 'MERGE_FAILED',
+            Date.now() - startTime
+        )
     }
 }
 

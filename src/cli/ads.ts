@@ -1,35 +1,46 @@
 /**
- * ADS CLI 入口 — nut-ads
+ * ADS CLI 入口 — nut ads
  *
  * Skill 通过这个命令行工具与 ADS 引擎（Harness）交互。
  *
  * 用法：
- *   nut-ads init <manifest> --task "任务描述"
- *   nut-ads next <manifest>
- *   nut-ads status <manifest>
- *   nut-ads check <manifest>
- *   nut-ads retry <manifest>
- *   nut-ads reset <manifest>
- *   nut-ads gc <manifest>
- *   nut-ads subtask-add <manifest> --desc "子任务描述" [--id xxx] [--produces "a,b"]
- *   nut-ads subtask-done <manifest> --id <subtaskId>
- *   nut-ads emit <manifest> --key <key> --kind file|value [--path xxx] [--value xxx]
+ *   nut ads init <manifest> --task "任务描述"
+ *   nut ads next <manifest>
+ *   nut ads status <manifest>
+ *   nut ads check <manifest>
+ *   nut ads retry <manifest>
+ *   nut ads reset <manifest>
+ *   nut ads gc <manifest>
+ *   nut ads subtask-add <manifest> --desc "子任务描述" [--id xxx] [--produces "a,b"]
+ *   nut ads subtask-done <manifest> --id <subtaskId>
+ *   nut ads emit <manifest> --key <key> --kind file|value [--path xxx] [--value xxx]
  *
  * manifest = anchor.config.json 路径
  *
  * @example
- *   nut-ads init .codebuddy/skills/my-skill/anchor.config.json --task "实现用户列表"
- *   nut-ads next .codebuddy/skills/my-skill/anchor.config.json
+ *   nut ads init .codebuddy/skills/my-skill/anchor.config.json --task "实现用户列表"
+ *   nut ads next .codebuddy/skills/my-skill/anchor.config.json
  */
 
 import { loadManifest, Ads } from '../ads'
+import { runMetric, printMetricHelp } from '../ads/metrics'
 
-async function main() {
-    const args = process.argv.slice(2)
+export async function runAds(args: string[]): Promise<void> {
     const command = args[0]
 
     if (!command || command === '--help' || command === '-h') {
         printHelp()
+        return
+    }
+
+    // ★ metric 子命令不依赖 manifest，独立分发
+    if (command === 'metric') {
+        const metricArgs = args.slice(1)
+        if (!metricArgs.length || metricArgs[0] === '--help' || metricArgs[0] === '-h') {
+            printMetricHelp()
+            return
+        }
+        await runMetric(metricArgs)
         return
     }
 
@@ -217,7 +228,7 @@ function printInstruction(instruction: ReturnType<typeof Ads.prototype.status>) 
         const subs = instruction.subtasks || []
         console.log(`\n🧩 子任务 (${subs.filter(s => s.status === 'done').length}/${subs.length} 完成):`)
         if (subs.length === 0) {
-            console.log('  ⚠️ 本阶段要求先拆分子任务：nut-ads subtask-add ... --desc "..."')
+            console.log('  ⚠️ 本阶段要求先拆分子任务：nut ads subtask-add ... --desc "..."')
         }
         for (const s of subs) {
             console.log(`  ${s.status === 'done' ? '✅' : '⬜'} ${s.id} — ${s.desc}`)
@@ -277,19 +288,20 @@ function printHelp() {
 🔧 ADS CLI - Anchor-Driven Skill 运行时
 
 用法:
-  nut-ads <命令> <manifest> [选项]
+  nut ads <命令> <manifest> [选项]
 
 命令:
-  init          初始化任务       nut-ads init <manifest> --task "任务描述"
-  next          推进到下一阶段    nut-ads next <manifest>
-  status        查看当前指令      nut-ads status <manifest>
-  check         手动验证当前阶段   nut-ads check <manifest>
-  retry         开始新一轮尝试     nut-ads retry <manifest>
-  reset         重置任务          nut-ads reset <manifest>
-  gc            回收过期临时目录   nut-ads gc <manifest>
-  subtask-add   拆分子任务        nut-ads subtask-add <manifest> --desc "..." [--id x] [--produces "a,b"]
-  subtask-done  完成子任务        nut-ads subtask-done <manifest> --id <subtaskId>
-  emit          产出 artifact    nut-ads emit <manifest> --key k --kind file|value [--path p] [--value v]
+  init          初始化任务       nut ads init <manifest> --task "任务描述"
+  next          推进到下一阶段    nut ads next <manifest>
+  status        查看当前指令      nut ads status <manifest>
+  check         手动验证当前阶段   nut ads check <manifest>
+  retry         开始新一轮尝试     nut ads retry <manifest>
+  reset         重置任务          nut ads reset <manifest>
+  gc            回收过期临时目录   nut ads gc <manifest>
+  subtask-add   拆分子任务        nut ads subtask-add <manifest> --desc "..." [--id x] [--produces "a,b"]
+  subtask-done  完成子任务        nut ads subtask-done <manifest> --id <subtaskId>
+  emit          产出 artifact    nut ads emit <manifest> --key k --kind file|value [--path p] [--value v]
+  metric        客观度量          nut ads metric <type> [--dir src] [--input plan.json]
 
 manifest:
   anchor.config.json 文件路径
@@ -306,22 +318,20 @@ manifest:
 
 示例:
   # 初始化前端开发任务（自动创建隔离 scratch + GC 过期残留）
-  nut-ads init .codebuddy/skills/frontend-dev/anchor.config.json --task "实现用户列表页"
+  nut ads init .codebuddy/skills/frontend-dev/anchor.config.json --task "实现用户列表页"
 
   # 推进（内部强制验证 + 子任务闭环 + artifact 校验 + 熔断）
-  nut-ads next .codebuddy/skills/frontend-dev/anchor.config.json
+  nut ads next .codebuddy/skills/frontend-dev/anchor.config.json
 
   # 大任务动态拆子任务
-  nut-ads subtask-add <manifest> --desc "实现列表分页"
-  nut-ads subtask-done <manifest> --id design-sub-1
+  nut ads subtask-add <manifest> --desc "实现列表分页"
+  nut ads subtask-done <manifest> --id design-sub-1
 
   # 阶段间传数据
-  nut-ads emit <manifest> --key apiSpec --kind file --path .specflow/scratch/xxx/artifacts/api.json
+  nut ads emit <manifest> --key apiSpec --kind file --path .specflow/scratch/xxx/artifacts/api.json
 
   # 断线恢复：查看当前在哪一步；重做前刷新 fresh 基准
-  nut-ads status <manifest>
-  nut-ads retry <manifest>
+  nut ads status <manifest>
+  nut ads retry <manifest>
 `)
 }
-
-main()

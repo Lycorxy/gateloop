@@ -11,14 +11,7 @@
  *   - retryStage    重置本阶段一轮尝试时间（断点续跑 fresh 校验用）
  */
 
-import {
-    existsSync,
-    readFileSync,
-    writeFileSync,
-    mkdirSync,
-    appendFileSync,
-    rmSync
-} from 'node:fs'
+import { existsSync, readFileSync, writeFileSync, mkdirSync, appendFileSync, rmSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import type {
     AnchorState,
@@ -31,7 +24,8 @@ import type {
     ArtifactInline,
     VerifyResult,
     Artifact,
-    SubTask
+    SubTask,
+    VerifyHooks
 } from './types'
 import {
     generateTaskId,
@@ -139,14 +133,18 @@ export function initTask(
 
     writeState(cwd, state, manifest.stateFile)
 
-    appendLog(cwd, {
-        timestamp: now,
-        skill: manifest.name,
-        task,
-        stage: firstAnchor?.id || '',
-        action: 'init',
-        message: `任务初始化: ${task} (taskId=${taskId})${recycled.length ? `, GC 回收 ${recycled.length} 个残留目录` : ''}`
-    }, manifest.logFile)
+    appendLog(
+        cwd,
+        {
+            timestamp: now,
+            skill: manifest.name,
+            task,
+            stage: firstAnchor?.id || '',
+            action: 'init',
+            message: `任务初始化: ${task} (taskId=${taskId})${recycled.length ? `, GC 回收 ${recycled.length} 个残留目录` : ''}`
+        },
+        manifest.logFile
+    )
 
     return state
 }
@@ -185,14 +183,18 @@ export function addSubtasks(
     stageRecord.subtasks = existing
     writeState(cwd, state, manifest.stateFile)
 
-    appendLog(cwd, {
-        timestamp: now,
-        skill: manifest.name,
-        task: state.task,
-        stage: stageRecord.anchorId,
-        action: 'subtask',
-        message: `拆分 ${subtasks.length} 个子任务，当前共 ${existing.length} 个`
-    }, manifest.logFile)
+    appendLog(
+        cwd,
+        {
+            timestamp: now,
+            skill: manifest.name,
+            task: state.task,
+            stage: stageRecord.anchorId,
+            action: 'subtask',
+            message: `拆分 ${subtasks.length} 个子任务，当前共 ${existing.length} 个`
+        },
+        manifest.logFile
+    )
 
     return existing
 }
@@ -217,14 +219,18 @@ export function completeSubtask(
     target.completedAt = now
     writeState(cwd, state, manifest.stateFile)
 
-    appendLog(cwd, {
-        timestamp: now,
-        skill: manifest.name,
-        task: state.task,
-        stage: stageRecord!.anchorId,
-        action: 'subtask',
-        message: `子任务完成: ${subtaskId}`
-    }, manifest.logFile)
+    appendLog(
+        cwd,
+        {
+            timestamp: now,
+            skill: manifest.name,
+            task: state.task,
+            stage: stageRecord!.anchorId,
+            action: 'subtask',
+            message: `子任务完成: ${subtaskId}`
+        },
+        manifest.logFile
+    )
 
     return stageRecord!.subtasks || null
 }
@@ -254,14 +260,18 @@ export function emitArtifact(
     }
     writeState(cwd, state, manifest.stateFile)
 
-    appendLog(cwd, {
-        timestamp: now,
-        skill: manifest.name,
-        task: state.task,
-        stage: producedBy,
-        action: 'artifact',
-        message: `产出 artifact: ${artifact.key} (${artifact.kind})`
-    }, manifest.logFile)
+    appendLog(
+        cwd,
+        {
+            timestamp: now,
+            skill: manifest.name,
+            task: state.task,
+            stage: producedBy,
+            action: 'artifact',
+            message: `产出 artifact: ${artifact.key} (${artifact.kind})`
+        },
+        manifest.logFile
+    )
 
     return state.artifacts
 }
@@ -302,124 +312,228 @@ export function retryStage(
  */
 export async function doNext(
     manifest: AnchorManifest,
-    verifyFn: (anchor: AnchorDefinition, cwd: string, state: AnchorState) => Promise<VerifyResult>,
+    verifyFn: (
+        anchor: AnchorDefinition,
+        cwd: string,
+        state: AnchorState,
+        hooks?: VerifyHooks
+    ) => Promise<VerifyResult>,
     cwd: string = manifest.cwd || process.cwd()
 ): Promise<AnchorInstruction> {
     const state = readState(cwd, manifest.stateFile)
 
     if (!state) {
-        return {
-            stage: '',
-            advanced: false,
-            done: false,
-            nextAction: '⚠️ 状态不存在，请先调用 init(task)'
-        }
+        return notInitialized()
     }
 
     if (state.done) {
-        return { stage: '', advanced: false, done: true, nextAction: '✅ 所有阶段已完成' }
+        return allDone()
     }
 
     const currentAnchor = manifest.anchors[state.currentAnchorIndex]
     if (!currentAnchor) {
-        return { stage: '', advanced: false, done: true, nextAction: '✅ 所有阶段已完成' }
+        return allDone()
     }
 
     const stageRecord = state.stages[state.currentAnchorIndex]
-    const now = new Date().toISOString()
-    const maxAttempts = resolveMaxAttempts(manifest, currentAnchor)
 
     // ★ 前置门禁 1：子任务闭环校验
-    if (currentAnchor.requiresSubtasks) {
-        const subtasks = stageRecord.subtasks || []
-        if (subtasks.length === 0) {
-            return buildInstruction(manifest, currentAnchor, state, false, {
-                passed: false,
-                checks: [],
-                errors: ['本阶段要求先拆分子任务（requiresSubtasks），请先调用 addSubtasks'],
-                duration: 0
-            })
-        }
-        const pending = subtasks.filter((s) => s.status !== 'done')
-        if (pending.length > 0) {
-            return buildInstruction(manifest, currentAnchor, state, false, {
-                passed: false,
-                checks: [],
-                errors: [`还有 ${pending.length} 个子任务未完成: ${pending.map((s) => s.id).join(', ')}`],
-                duration: 0
-            })
-        }
+    const subtaskError = checkSubtasks(currentAnchor, stageRecord)
+    if (subtaskError) {
+        return buildInstruction(manifest, currentAnchor, state, false, subtaskError)
     }
 
     // ★ 核心防作弊：强制重跑验证
-    appendLog(cwd, {
-        timestamp: now,
-        skill: manifest.name,
-        task: state.task,
-        stage: currentAnchor.id,
-        action: 'verify',
-        message: `验证阶段: ${currentAnchor.id}`
-    }, manifest.logFile)
+    logStageEvent(
+        cwd,
+        manifest,
+        state,
+        currentAnchor.id,
+        'verify',
+        undefined,
+        `验证阶段: ${currentAnchor.id}`
+    )
 
-    const verifyResult = await verifyFn(currentAnchor, cwd, state)
-
-    // ★ 前置门禁 2：emits 校验（并入 verifyResult）
-    if (verifyResult.passed && currentAnchor.emits && currentAnchor.emits.length > 0) {
-        const missing = currentAnchor.emits.filter((key) => !state.artifacts[key])
-        if (missing.length > 0) {
-            verifyResult.passed = false
-            verifyResult.errors.push(`未产出声明的 artifact: ${missing.join(', ')}（请调用 emitArtifact）`)
-            verifyResult.checks.push({
-                name: 'Artifact 产出',
-                passed: false,
-                output: `缺失: ${missing.join(', ')}`
-            })
+    // autoEmit 钩子：produceScripts 成功后更新 state.artifacts 并持久化
+    const verifyHooks: VerifyHooks = {
+        emit: (artifact) => {
+            state.artifacts[artifact.key] = {
+                key: artifact.key,
+                producedBy: currentAnchor.id,
+                kind: artifact.kind,
+                path: artifact.path,
+                value: artifact.value,
+                producedAt: new Date().toISOString()
+            }
+            writeState(cwd, state, manifest.stateFile)
         }
     }
+
+    const verifyResult = await verifyFn(currentAnchor, cwd, state, verifyHooks)
+
+    // ★ 前置门禁 2：emits 校验（并入 verifyResult）
+    checkEmits(currentAnchor, verifyResult, state)
 
     stageRecord.attempts++
     stageRecord.verifyResult = verifyResult
 
+    const maxAttempts = resolveMaxAttempts(manifest, currentAnchor)
+
     if (!verifyResult.passed) {
-        // ★ 熔断判定
-        if (stageRecord.attempts >= maxAttempts) {
-            stageRecord.status = 'escalated'
-            stageRecord.escalated = true
-            writeState(cwd, state, manifest.stateFile)
-
-            appendLog(cwd, {
-                timestamp: new Date().toISOString(),
-                skill: manifest.name,
-                task: state.task,
-                stage: currentAnchor.id,
-                action: 'escalate',
-                verifyResult,
-                message: `连续失败 ${stageRecord.attempts} 次，触发熔断`
-            }, manifest.logFile)
-
-            const inst = buildInstruction(manifest, currentAnchor, state, false, verifyResult)
-            inst.escalate = true
-            inst.nextAction = `🛑 连续失败 ${stageRecord.attempts}/${maxAttempts} 次，已熔断。需人工介入或降级方案。可调用 reset 重来，或修正 manifest 后 retry。`
-            return inst
-        }
-
-        stageRecord.status = 'failed'
-        writeState(cwd, state, manifest.stateFile)
-
-        appendLog(cwd, {
-            timestamp: new Date().toISOString(),
-            skill: manifest.name,
-            task: state.task,
-            stage: currentAnchor.id,
-            action: 'verify',
+        return handleFailure(
+            cwd,
+            manifest,
+            state,
+            currentAnchor,
+            stageRecord,
             verifyResult,
-            message: `验证失败: ${verifyResult.errors.length} 个错误 (${stageRecord.attempts}/${maxAttempts})`
-        }, manifest.logFile)
-
-        return buildInstruction(manifest, currentAnchor, state, false, verifyResult)
+            maxAttempts
+        )
     }
 
-    // 验证通过 → 标记完成，推进
+    return handleSuccess(cwd, manifest, state, currentAnchor, stageRecord, verifyResult)
+}
+
+// ==================== doNext 子函数 ====================
+
+/** 状态不存在时的返回 */
+function notInitialized(): AnchorInstruction {
+    return {
+        stage: '',
+        advanced: false,
+        done: false,
+        nextAction: '⚠️ 状态不存在，请先调用 init(task)'
+    }
+}
+
+/** 全部完成时的返回 */
+function allDone(): AnchorInstruction {
+    return { stage: '', advanced: false, done: true, nextAction: '✅ 所有阶段已完成' }
+}
+
+/**
+ * 前置门禁 1：子任务闭环校验
+ * @returns 失败时返回 VerifyResult，通过时返回 undefined
+ */
+function checkSubtasks(
+    anchor: AnchorDefinition,
+    stageRecord: StageRecord | undefined
+): VerifyResult | undefined {
+    if (!anchor.requiresSubtasks) return undefined
+
+    const subtasks = stageRecord?.subtasks || []
+    if (subtasks.length === 0) {
+        return {
+            passed: false,
+            checks: [],
+            errors: ['本阶段要求先拆分子任务（requiresSubtasks），请先调用 addSubtasks'],
+            duration: 0
+        }
+    }
+
+    const pending = subtasks.filter((s) => s.status !== 'done')
+    if (pending.length > 0) {
+        return {
+            passed: false,
+            checks: [],
+            errors: [
+                `还有 ${pending.length} 个子任务未完成: ${pending.map((s) => s.id).join(', ')}`
+            ],
+            duration: 0
+        }
+    }
+
+    return undefined
+}
+
+/**
+ * 前置门禁 2：emits 校验
+ * 将缺失的 artifact 并入 verifyResult（仅在 verify 通过时才检查）
+ */
+function checkEmits(
+    anchor: AnchorDefinition,
+    verifyResult: VerifyResult,
+    state: AnchorState
+): void {
+    if (!verifyResult.passed || !anchor.emits || anchor.emits.length === 0) return
+
+    const missing = anchor.emits.filter((key) => !state.artifacts[key])
+    if (missing.length > 0) {
+        verifyResult.passed = false
+        verifyResult.errors.push(
+            `未产出声明的 artifact: ${missing.join(', ')}（请调用 emitArtifact）`
+        )
+        verifyResult.checks.push({
+            name: 'Artifact 产出',
+            passed: false,
+            output: `缺失: ${missing.join(', ')}`
+        })
+    }
+}
+
+/**
+ * 处理验证失败：熔断判定 or 记录失败 + 返回修复指令
+ */
+function handleFailure(
+    cwd: string,
+    manifest: AnchorManifest,
+    state: AnchorState,
+    anchor: AnchorDefinition,
+    stageRecord: StageRecord,
+    verifyResult: VerifyResult,
+    maxAttempts: number
+): AnchorInstruction {
+    // ★ 熔断判定
+    if (stageRecord.attempts >= maxAttempts) {
+        stageRecord.status = 'escalated'
+        stageRecord.escalated = true
+        writeState(cwd, state, manifest.stateFile)
+
+        logStageEvent(
+            cwd,
+            manifest,
+            state,
+            anchor.id,
+            'escalate',
+            verifyResult,
+            `连续失败 ${stageRecord.attempts} 次，触发熔断`
+        )
+
+        const inst = buildInstruction(manifest, anchor, state, false, verifyResult)
+        inst.escalate = true
+        inst.nextAction = `🛑 连续失败 ${stageRecord.attempts}/${maxAttempts} 次，已熔断。需人工介入或降级方案。可调用 reset 重来，或修正 manifest 后 retry。`
+        return inst
+    }
+
+    stageRecord.status = 'failed'
+    writeState(cwd, state, manifest.stateFile)
+
+    logStageEvent(
+        cwd,
+        manifest,
+        state,
+        anchor.id,
+        'verify',
+        verifyResult,
+        `验证失败: ${verifyResult.errors.length} 个错误 (${stageRecord.attempts}/${maxAttempts})`
+    )
+
+    return buildInstruction(manifest, anchor, state, false, verifyResult)
+}
+
+/**
+ * 处理验证成功：标记完成，推进到下一阶段 or 完成任务
+ */
+function handleSuccess(
+    cwd: string,
+    manifest: AnchorManifest,
+    state: AnchorState,
+    anchor: AnchorDefinition,
+    stageRecord: StageRecord,
+    verifyResult: VerifyResult
+): AnchorInstruction {
+    const now = new Date().toISOString()
+
     stageRecord.status = 'passed'
     stageRecord.completedAt = now
 
@@ -438,15 +552,15 @@ export async function doNext(
 
     writeState(cwd, state, manifest.stateFile)
 
-    appendLog(cwd, {
-        timestamp: now,
-        skill: manifest.name,
-        task: state.task,
-        stage: currentAnchor.id,
-        action: 'advance',
+    logStageEvent(
+        cwd,
+        manifest,
+        state,
+        anchor.id,
+        'advance',
         verifyResult,
-        message: nextAnchor ? `推进到: ${nextAnchor.id}` : '任务完成'
-    }, manifest.logFile)
+        nextAnchor ? `推进到: ${nextAnchor.id}` : '任务完成'
+    )
 
     if (nextAnchor) {
         return buildInstruction(manifest, nextAnchor, state, true, undefined)
@@ -454,16 +568,47 @@ export async function doNext(
 
     // 全部完成 → 清理 workspace（保留 artifacts 供审计）
     cleanupScratch(cwd, state.taskId, manifest.scratchDir, false)
-    appendLog(cwd, {
-        timestamp: new Date().toISOString(),
-        skill: manifest.name,
-        task: state.task,
-        stage: currentAnchor.id,
-        action: 'cleanup',
-        message: `任务完成，已清理 workspace（保留 artifacts）`
-    }, manifest.logFile)
+    logStageEvent(
+        cwd,
+        manifest,
+        state,
+        anchor.id,
+        'cleanup',
+        undefined,
+        '任务完成，已清理 workspace（保留 artifacts）'
+    )
 
     return { stage: '', advanced: true, done: true, nextAction: '✅ 所有阶段已完成' }
+}
+
+// ==================== 日志辅助 ====================
+
+/**
+ * 构造并追加一条阶段事件日志
+ * 消除 doNext 中重复的 appendLog 构造代码
+ */
+function logStageEvent(
+    cwd: string,
+    manifest: AnchorManifest,
+    state: AnchorState,
+    stage: string,
+    action: LogEntry['action'],
+    verifyResult: VerifyResult | undefined,
+    message: string
+): void {
+    appendLog(
+        cwd,
+        {
+            timestamp: new Date().toISOString(),
+            skill: manifest.name,
+            task: state.task,
+            stage,
+            action,
+            verifyResult,
+            message
+        },
+        manifest.logFile
+    )
 }
 
 // ==================== 查询当前状态 ====================
@@ -507,50 +652,13 @@ function buildInstruction(
 ): AnchorInstruction {
     const baseCwd = manifest.cwd || process.cwd()
 
-    // 内联规则内容
-    const rulesInline: RuleInline[] = []
-    if (anchor.reads) {
-        for (const readPath of anchor.reads) {
-            const fullPath = join(baseCwd, readPath)
-            if (existsSync(fullPath)) {
-                try {
-                    rulesInline.push({ source: readPath, content: readFileSync(fullPath, 'utf-8') })
-                } catch {
-                    rulesInline.push({ source: readPath, content: '⚠️ 规则文件读取失败' })
-                }
-            }
-        }
-    }
-
-    // 内联上游 artifact（consumes 声明的数据）
-    const artifactsInline: ArtifactInline[] = []
-    if (anchor.consumes) {
-        for (const key of anchor.consumes) {
-            const art = state.artifacts[key]
-            if (!art) {
-                artifactsInline.push({ key, producedBy: '?', kind: 'value', content: `⚠️ 上游未产出 artifact: ${key}` })
-                continue
-            }
-            let content = ''
-            if (art.kind === 'file' && art.path) {
-                const fp = join(baseCwd, art.path)
-                content = existsSync(fp) ? safeRead(fp) : `⚠️ artifact 文件不存在: ${art.path}`
-            } else {
-                content = safeStringify(art.value)
-            }
-            artifactsInline.push({ key, producedBy: art.producedBy, kind: art.kind, path: art.path, content })
-        }
-    }
+    const rulesInline = inlineRules(anchor, baseCwd)
+    const artifactsInline = inlineArtifacts(anchor, state, baseCwd)
 
     const stageRecord = state.stages[state.currentAnchorIndex]
     const maxAttempts = resolveMaxAttempts(manifest, anchor)
     const attempts = stageRecord?.attempts ?? 0
-
-    const nextAction = advanced
-        ? `✅ 验证通过，已推进到 ${anchor.id} 阶段。按 brief 执行，完成后调用 next。`
-        : verifyResult
-            ? `❌ 验证未通过（${verifyResult.errors.length} 个错误，${attempts}/${maxAttempts} 次）。修复后重新调用 next。\n错误：\n${verifyResult.errors.slice(0, 10).join('\n')}`
-            : `当前阶段: ${anchor.id}。按 brief 执行，完成后调用 next 推进。`
+    const nextAction = buildNextAction(anchor, advanced, verifyResult, attempts, maxAttempts)
 
     return {
         stage: anchor.id,
@@ -575,6 +683,81 @@ function buildInstruction(
     }
 }
 
+/** 内联规则文件内容（reads → rulesInline） */
+function inlineRules(anchor: AnchorDefinition, baseCwd: string): RuleInline[] {
+    const rulesInline: RuleInline[] = []
+    if (!anchor.reads) return rulesInline
+
+    for (const readPath of anchor.reads) {
+        const fullPath = join(baseCwd, readPath)
+        if (!existsSync(fullPath)) continue
+        try {
+            rulesInline.push({ source: readPath, content: readFileSync(fullPath, 'utf-8') })
+        } catch {
+            rulesInline.push({ source: readPath, content: '⚠️ 规则文件读取失败' })
+        }
+    }
+    return rulesInline
+}
+
+/** 内联上游 artifact（consumes → artifactsInline） */
+function inlineArtifacts(
+    anchor: AnchorDefinition,
+    state: AnchorState,
+    baseCwd: string
+): ArtifactInline[] {
+    const artifactsInline: ArtifactInline[] = []
+    if (!anchor.consumes) return artifactsInline
+
+    for (const key of anchor.consumes) {
+        const art = state.artifacts[key]
+        if (!art) {
+            artifactsInline.push({
+                key,
+                producedBy: '?',
+                kind: 'value',
+                content: `⚠️ 上游未产出 artifact: ${key}`
+            })
+            continue
+        }
+        const content = resolveArtifactContent(art, baseCwd)
+        artifactsInline.push({
+            key,
+            producedBy: art.producedBy,
+            kind: art.kind,
+            path: art.path,
+            content
+        })
+    }
+    return artifactsInline
+}
+
+/** 解析 artifact 内容：文件类读文件，值类序列化 */
+function resolveArtifactContent(art: Artifact, baseCwd: string): string {
+    if (art.kind === 'file' && art.path) {
+        const fp = join(baseCwd, art.path)
+        return existsSync(fp) ? safeRead(fp) : `⚠️ artifact 文件不存在: ${art.path}`
+    }
+    return safeStringify(art.value)
+}
+
+/** 构建 nextAction 文本 */
+function buildNextAction(
+    anchor: AnchorDefinition,
+    advanced: boolean,
+    verifyResult: VerifyResult | undefined,
+    attempts: number,
+    maxAttempts: number
+): string {
+    if (advanced) {
+        return `✅ 验证通过，已推进到 ${anchor.id} 阶段。按 brief 执行，完成后调用 next。`
+    }
+    if (verifyResult) {
+        return `❌ 验证未通过（${verifyResult.errors.length} 个错误，${attempts}/${maxAttempts} 次）。修复后重新调用 next。\n错误：\n${verifyResult.errors.slice(0, 10).join('\n')}`
+    }
+    return `当前阶段: ${anchor.id}。按 brief 执行，完成后调用 next 推进。`
+}
+
 /** 安全读文件 */
 function safeRead(path: string): string {
     try {
@@ -596,16 +779,42 @@ function safeStringify(value: unknown): string {
 /** 构建验证提示（只展示，真正执行在 verify.ts） */
 function buildVerifyHint(verify?: AnchorDefinition['verify']): string | undefined {
     if (!verify) return undefined
-    const parts: string[] = []
-    if (verify.schema) parts.push('JSON Schema 校验')
-    if (verify.lint) parts.push('ESLint')
-    if (verify.tsc) parts.push('tsc --noEmit')
-    if (verify.stylelint) parts.push('Stylelint')
-    if (verify.build) parts.push('构建')
-    if (verify.test) parts.push('单测')
-    if (verify.custom) parts.push('自定义命令')
-    if (verify.producesExist !== false && parts.length === 0) parts.push('产物存在性')
-    return parts.length > 0 ? parts.join(' + ') + '（由引擎内部执行）' : undefined
+
+    const checks: Array<[unknown, string]> = [
+        [verify.schema, 'JSON Schema 校验'],
+        [verify.lintFix, 'ESLint Fix（nut lint fix --write）'],
+        [verify.lint, 'ESLint'],
+        [verify.tsc, 'tsc --noEmit'],
+        [verify.stylelint, 'Stylelint'],
+        [verify.build, '构建'],
+        [verify.test, '单测'],
+        [verify.custom, '自定义命令'],
+        [verify.fileSize, '文件规模（行数/函数/复杂度）'],
+        [verify.prettier, 'Prettier 格式'],
+        [verify.review, '结构化质量评审（逐条 verdict+evidence）']
+    ]
+
+    const parts = checks.filter(([cond]) => cond).map(([, label]) => label)
+
+    if (verify.producesExist !== false && parts.length === 0) {
+        parts.push('产物存在性')
+    }
+
+    // 评审详情：让模型知道要评什么、结论写到哪里、用什么格式
+    // 不告诉模型这些，review 门禁会因产物不存在永远 FAIL
+    if (verify.review) {
+        const items = verify.review.checklist.map((c) => {
+            const tag = c.mode === 'script' ? '脚本判定' : '模型评审'
+            const block = c.blocking === false ? '（非阻断）' : ''
+            return `  - [${tag}] ${c.id}: ${c.rule}${block}`
+        })
+        parts.push(
+            `质量评审清单（逐条给 verdict[pass/fail]+evidence，结论写入 ${verify.review.output}，` +
+                `格式 {"verdicts":[{"id","mode","verdict","evidence"}]}）:\n${items.join('\n')}`
+        )
+    }
+
+    return parts.length > 0 ? `${parts.join(' + ')}（由引擎内部执行）` : undefined
 }
 
 // ==================== 重置 ====================
@@ -627,12 +836,16 @@ export function resetTask(
         rmSync(statePath, { force: true })
     }
 
-    appendLog(cwd, {
-        timestamp: new Date().toISOString(),
-        skill: manifest.name,
-        task: state?.task || '',
-        stage: state?.currentStage || '',
-        action: 'reset',
-        message: '任务已重置，状态与 scratch 已清理'
-    }, manifest.logFile)
+    appendLog(
+        cwd,
+        {
+            timestamp: new Date().toISOString(),
+            skill: manifest.name,
+            task: state?.task || '',
+            stage: state?.currentStage || '',
+            action: 'reset',
+            message: '任务已重置，状态与 scratch 已清理'
+        },
+        manifest.logFile
+    )
 }

@@ -299,55 +299,13 @@ export class SnapshotManager {
             }
         }
 
-        // 恢复前先备份当前状态
         if (backupFirst) {
-            const isClean = await isWorktreeClean(this.cwd)
-            if (!isClean) {
-                await this.createSnapshot('restore', {
-                    description: `恢复到快照 #${snapshot.index} 前的自动备份`,
-                    tags: ['auto-backup', 'pre-restore']
-                })
-            }
+            await this.backupBeforeRestore(snapshot)
         }
 
         try {
-            // 先切换到快照所在分支
-            const currentBranch = await getCurrentBranch(this.cwd)
-            if (snapshot.branch && currentBranch !== snapshot.branch) {
-                try {
-                    await gitExecOrThrow(['checkout', snapshot.branch], { cwd: this.cwd })
-                } catch {
-                    // 分支可能已被删除，继续尝试恢复
-                }
-            }
-
-            // 回退 HEAD 到快照时的提交
-            if (snapshot.headCommit) {
-                const mode = force ? '--hard' : '--mixed'
-                await gitExecOrThrow(['reset', mode, snapshot.headCommit], { cwd: this.cwd })
-            }
-
-            // 如果有 stash，恢复工作区
-            if (snapshot.stashRef && !cleanAfter) {
-                try {
-                    await gitExecOrThrow(['stash', 'pop', snapshot.stashRef], {
-                        cwd: this.cwd,
-                        silent: true
-                    })
-                } catch {
-                    // stash 可能已被使用或存在冲突
-                }
-            }
-
-            // 更新当前索引
-            this.store.currentIndex = snapshot.index
-
-            // 可选：清理快照之后的所有快照
-            if (cleanAfter) {
-                this.store.snapshots = this.store.snapshots.slice(0, snapshot.index + 1)
-            }
-
-            this.save()
+            await this.restoreGitState(snapshot, force, cleanAfter)
+            this.updateStoreAfterRestore(snapshot, cleanAfter)
 
             return {
                 success: true,
@@ -372,6 +330,70 @@ export class SnapshotManager {
                 duration: Date.now() - startTime
             }
         }
+    }
+
+    /** 恢复前自动备份 */
+    private async backupBeforeRestore(snapshot: Snapshot): Promise<void> {
+        const isClean = await isWorktreeClean(this.cwd)
+        if (!isClean) {
+            await this.createSnapshot('restore', {
+                description: `恢复到快照 #${snapshot.index} 前的自动备份`,
+                tags: ['auto-backup', 'pre-restore']
+            })
+        }
+    }
+
+    /** 恢复 git 状态：分支 + HEAD + stash */
+    private async restoreGitState(
+        snapshot: Snapshot,
+        force: boolean,
+        cleanAfter: boolean
+    ): Promise<void> {
+        await this.restoreBranch(snapshot.branch)
+        await this.restoreHead(snapshot.headCommit, force)
+        if (snapshot.stashRef && !cleanAfter) {
+            await this.restoreStash(snapshot.stashRef)
+        }
+    }
+
+    /** 恢复到快照所在分支 */
+    private async restoreBranch(branch?: string): Promise<void> {
+        if (!branch) return
+        const currentBranch = await getCurrentBranch(this.cwd)
+        if (currentBranch === branch) return
+        try {
+            await gitExecOrThrow(['checkout', branch], { cwd: this.cwd })
+        } catch {
+            // 分支可能已被删除
+        }
+    }
+
+    /** 回退 HEAD 到指定提交 */
+    private async restoreHead(headCommit: string | undefined, force: boolean): Promise<void> {
+        if (!headCommit) return
+        const mode = force ? '--hard' : '--mixed'
+        await gitExecOrThrow(['reset', mode, headCommit], { cwd: this.cwd })
+    }
+
+    /** 恢复 stash 工作区 */
+    private async restoreStash(stashRef: string): Promise<void> {
+        try {
+            await gitExecOrThrow(['stash', 'pop', stashRef], {
+                cwd: this.cwd,
+                silent: true
+            })
+        } catch {
+            // stash 可能已被使用或存在冲突
+        }
+    }
+
+    /** 更新索引 + 可选清理后续快照 */
+    private updateStoreAfterRestore(snapshot: Snapshot, cleanAfter: boolean): void {
+        this.store.currentIndex = snapshot.index
+        if (cleanAfter) {
+            this.store.snapshots = this.store.snapshots.slice(0, snapshot.index + 1)
+        }
+        this.save()
     }
 
     /**

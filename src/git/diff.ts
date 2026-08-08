@@ -39,6 +39,131 @@ function validateFilePath(filePath: string): void {
     }
 }
 
+/** diff 解析状态 */
+interface ParseState {
+    currentFile: FileChange | null
+    currentHunk: DiffHunk | null
+    oldLineNum: number
+    newLineNum: number
+}
+
+/** 匹配文件头（diff --git a/path b/path） */
+function tryMatchFileHeader(line: string, state: ParseState, files: FileChange[]): boolean {
+    const m = line.match(/^diff --git a\/(.+) b\/(.+)/)
+    if (!m) return false
+
+    if (state.currentFile) files.push(state.currentFile)
+    state.currentFile = {
+        path: m[2],
+        type: 'modified',
+        additions: 0,
+        deletions: 0,
+        hunks: []
+    }
+    state.currentHunk = null
+    return true
+}
+
+/** 匹配文件元信息（new/deleted/renamed） */
+function tryMatchFileMeta(line: string, state: ParseState): void {
+    if (!state.currentFile) return
+
+    if (line.match(/^new file mode/)) {
+        state.currentFile.type = 'added'
+    } else if (line.match(/^deleted file mode/)) {
+        state.currentFile.type = 'deleted'
+    } else {
+        const renamed = line.match(/^rename from (.+)/)
+        if (renamed) {
+            state.currentFile.type = 'renamed'
+            state.currentFile.oldPath = renamed[1]
+        }
+    }
+}
+
+/** 匹配块头（@@ -oldStart,oldLines +newStart,newLines @@） */
+function tryMatchHunkHeader(line: string, state: ParseState): boolean {
+    const m = line.match(/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/)
+    if (!m || !state.currentFile) return false
+
+    state.currentHunk = {
+        oldStart: parseInt(m[1]),
+        oldLines: parseInt(m[2] || '1'),
+        newStart: parseInt(m[3]),
+        newLines: parseInt(m[4] || '1'),
+        context: []
+    }
+    state.currentFile.hunks = state.currentFile.hunks || []
+    state.currentFile.hunks.push(state.currentHunk)
+    state.oldLineNum = state.currentHunk.oldStart
+    state.newLineNum = state.currentHunk.newStart
+    return true
+}
+
+/** 解析差异行（+/-/context） */
+function tryParseDiffLine(line: string, state: ParseState): void {
+    if (!state.currentFile || !state.currentHunk) return
+
+    const diffLine = buildDiffLine(line, state)
+    if (diffLine) {
+        state.currentHunk.context.push(diffLine)
+    }
+}
+
+/** 构建单行差异对象 */
+function buildDiffLine(line: string, state: ParseState): DiffLine | null {
+    if (line.startsWith('+') && !line.startsWith('+++')) {
+        return {
+            type: 'added',
+            newLine: state.newLineNum++,
+            content: line.slice(1)
+        }
+    }
+    if (line.startsWith('-') && !line.startsWith('---')) {
+        return {
+            type: 'removed',
+            oldLine: state.oldLineNum++,
+            content: line.slice(1)
+        }
+    }
+    if (isContextLine(line)) {
+        return {
+            type: 'context',
+            oldLine: state.oldLineNum++,
+            newLine: state.newLineNum++,
+            content: line.startsWith(' ') ? line.slice(1) : line
+        }
+    }
+    return null
+}
+
+/** 判断是否为上下文行（非 +、-、\、index、---、+++） */
+function isContextLine(line: string): boolean {
+    return (
+        !line.startsWith('\\') &&
+        !line.startsWith('index ') &&
+        !line.startsWith('---') &&
+        !line.startsWith('+++')
+    )
+}
+
+/** 构建 diff 命令参数 */
+function buildDiffArgs(
+    fromRef: string | undefined,
+    toRef: string | undefined,
+    options: DiffOptions
+): string[] {
+    const args: string[] = ['diff']
+    args.push(options.unified !== undefined ? `-U${options.unified}` : '-U3')
+    if (options.ignoreWhitespace) args.push('--ignore-space-change')
+    if (options.nameOnly) args.push('--name-only')
+    if (options.stat) args.push('--stat')
+    if (fromRef) args.push(fromRef)
+    if (toRef) args.push(toRef)
+    if (options.filePattern) args.push('--', options.filePattern)
+    return args
+}
+
 /**
  * 差异对比器
  */
@@ -61,67 +186,14 @@ export class DiffViewer {
         const startTime = Date.now()
 
         try {
-            const args: string[] = ['diff']
-
-            if (options.unified !== undefined) {
-                args.push(`-U${options.unified}`)
-            } else {
-                args.push('-U3') // 默认3行上下文
-            }
-
-            if (options.ignoreWhitespace) args.push('--ignore-space-change')
-            if (options.nameOnly) args.push('--name-only')
-            if (options.stat) args.push('--stat')
-
-            if (fromRef) args.push(fromRef)
-            if (toRef) args.push(toRef)
-            if (options.filePattern) args.push('--', options.filePattern)
-
+            const args = buildDiffArgs(fromRef, toRef, options)
             const output = await gitExecOrThrow(args, { cwd: this.cwd })
 
             if (options.nameOnly) {
-                const files = output.split('\n').filter(Boolean)
-                return {
-                    success: true,
-                    operation: 'stage',
-                    message: `${files.length} 个文件有变更`,
-                    data: { files, count: files.length },
-                    duration: Date.now() - startTime
-                }
+                return this.buildNameOnlyResult(output, startTime)
             }
 
-            // 解析 diff 输出
-            const parsed = this.parseDiffOutput(output)
-            const stats = this.calculateDiffStats(parsed)
-
-            return {
-                success: true,
-                operation: 'stage',
-                message: this.formatDiffSummary(stats),
-                data: {
-                    files: parsed.map((f) => ({
-                        path: f.path,
-                        type: f.type,
-                        additions: f.additions,
-                        deletions: f.deletions,
-                        hunks: f.hunks?.map((h) => ({
-                            header: `@@ -${h.oldStart},${h.oldLines} +${h.newStart},${h.newLines} @@`,
-                            changes: h.context.filter((l) => l.type !== 'context').length,
-                            context: h.context.slice(0, 20) // 限制输出量
-                        }))
-                    })),
-                    stats,
-                    rawDiff: output.slice(0, 2000) // 限制原始输出
-                },
-                duration: Date.now() - startTime,
-                summary: {
-                    from: fromRef || '工作区',
-                    to: toRef || '暂存区',
-                    filesChanged: stats.filesChanged,
-                    additions: stats.additions,
-                    deletions: stats.deletions
-                }
-            }
+            return this.buildDiffResult(output, fromRef, toRef, startTime)
         } catch (error) {
             return {
                 success: false,
@@ -129,6 +201,58 @@ export class DiffViewer {
                 message: '获取差异失败',
                 error: (error as Error).message,
                 duration: Date.now() - startTime
+            }
+        }
+    }
+
+    /** 构建 name-only 结果 */
+    private buildNameOnlyResult(output: string, startTime: number): GitResult {
+        const files = output.split('\n').filter(Boolean)
+        return {
+            success: true,
+            operation: 'stage',
+            message: `${files.length} 个文件有变更`,
+            data: { files, count: files.length },
+            duration: Date.now() - startTime
+        }
+    }
+
+    /** 构建完整 diff 结果 */
+    private buildDiffResult(
+        output: string,
+        fromRef: string | undefined,
+        toRef: string | undefined,
+        startTime: number
+    ): GitResult {
+        const parsed = this.parseDiffOutput(output)
+        const stats = this.calculateDiffStats(parsed)
+
+        return {
+            success: true,
+            operation: 'stage',
+            message: this.formatDiffSummary(stats),
+            data: {
+                files: parsed.map((f) => ({
+                    path: f.path,
+                    type: f.type,
+                    additions: f.additions,
+                    deletions: f.deletions,
+                    hunks: f.hunks?.map((h) => ({
+                        header: `@@ -${h.oldStart},${h.oldLines} +${h.newStart},${h.newLines} @@`,
+                        changes: h.context.filter((l) => l.type !== 'context').length,
+                        context: h.context.slice(0, 20)
+                    }))
+                })),
+                stats,
+                rawDiff: output.slice(0, 2000)
+            },
+            duration: Date.now() - startTime,
+            summary: {
+                from: fromRef || '工作区',
+                to: toRef || '暂存区',
+                filesChanged: stats.filesChanged,
+                additions: stats.additions,
+                deletions: stats.deletions
             }
         }
     }
@@ -495,101 +619,21 @@ export class DiffViewer {
         const files: FileChange[] = []
         const lines = output.split('\n')
 
-        let currentFile: FileChange | null = null
-        let currentHunk: DiffHunk | null = null
-        let oldLineNum = 0
-        let newLineNum = 0
-
-        for (const line of lines) {
-            // 文件头：diff --git a/path b/path
-            const fileMatch = line.match(/^diff --git a\/(.+) b\/(.+)/)
-            if (fileMatch) {
-                if (currentFile) files.push(currentFile)
-
-                currentFile = {
-                    path: fileMatch[2],
-                    type: 'modified',
-                    additions: 0,
-                    deletions: 0,
-                    hunks: []
-                }
-                currentHunk = null
-                continue
-            }
-
-            // 新增/删除文件
-            const newFileMatch = line.match(/^new file mode/)
-            const deletedFileMatch = line.match(/^deleted file mode/)
-            const renamedMatch = line.match(/^rename from (.+)/)
-
-            if (newFileMatch && currentFile) {
-                currentFile.type = 'added'
-            }
-            if (deletedFileMatch && currentFile) {
-                currentFile.type = 'deleted'
-            }
-            if (renamedMatch && currentFile) {
-                currentFile.type = 'renamed'
-                currentFile.oldPath = renamedMatch[1]
-            }
-
-            // 块头：@@ -oldStart,oldLines +newStart,newLines @@
-            const hunkMatch = line.match(/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/)
-            if (hunkMatch && currentFile) {
-                currentHunk = {
-                    oldStart: parseInt(hunkMatch[1]),
-                    oldLines: parseInt(hunkMatch[2] || '1'),
-                    newStart: parseInt(hunkMatch[3]),
-                    newLines: parseInt(hunkMatch[4] || '1'),
-                    context: []
-                }
-                currentFile.hunks = currentFile.hunks || []
-                currentFile.hunks.push(currentHunk)
-                oldLineNum = currentHunk.oldStart
-                newLineNum = currentHunk.newStart
-                continue
-            }
-
-            // 差异行
-            if (currentFile && currentHunk) {
-                let diffLine: DiffLine | null = null
-
-                if (line.startsWith('+') && !line.startsWith('+++')) {
-                    diffLine = {
-                        type: 'added',
-                        newLine: newLineNum++,
-                        content: line.slice(1)
-                    }
-                    currentFile.additions++
-                } else if (line.startsWith('-') && !line.startsWith('---')) {
-                    diffLine = {
-                        type: 'removed',
-                        oldLine: oldLineNum++,
-                        content: line.slice(1)
-                    }
-                    currentFile.deletions++
-                } else if (
-                    !line.startsWith('\\') &&
-                    !line.startsWith('index ') &&
-                    !line.startsWith('---') &&
-                    !line.startsWith('+++')
-                ) {
-                    diffLine = {
-                        type: 'context',
-                        oldLine: oldLineNum++,
-                        newLine: newLineNum++,
-                        content: line.startsWith(' ') ? line.slice(1) : line
-                    }
-                }
-
-                if (diffLine) {
-                    currentHunk.context.push(diffLine)
-                }
-            }
+        const state: ParseState = {
+            currentFile: null,
+            currentHunk: null,
+            oldLineNum: 0,
+            newLineNum: 0
         }
 
-        if (currentFile) files.push(currentFile)
+        for (const line of lines) {
+            if (tryMatchFileHeader(line, state, files)) continue
+            tryMatchFileMeta(line, state)
+            if (tryMatchHunkHeader(line, state)) continue
+            tryParseDiffLine(line, state)
+        }
 
+        if (state.currentFile) files.push(state.currentFile)
         return files
     }
 

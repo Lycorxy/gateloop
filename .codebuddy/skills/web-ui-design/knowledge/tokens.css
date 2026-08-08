@@ -1,0 +1,235 @@
+/* ============================================================
+   Web UI Design Token System v3.0
+   基于 Ant Design / Arco Design 暗色色板生成机制
+   核心改进：
+   1. 主色 10 级色板（浅色 + 暗色各一套）
+   2. 透明度叠加规则（色彩在暗背景上更好融合）
+   3. 暖灰暗色背景（#141414，非纯黑）
+   4. 语义色的暗色处理（背景用低透明度，非纯色块）
+   ============================================================ */
+
+:root {
+  /* ===== 间距 Token（4px 网格，唯一来源） ===== */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 28px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+
+  /* ===== 中性色（浅色模式，由浅到深 10 级） ===== */
+  --neutral-00: #ffffff;
+  --neutral-01: #fafafa;
+  --neutral-02: #f5f5f5;
+  --neutral-03: #e8e8e8;
+  --neutral-04: #d4d4d4;
+  --neutral-05: #a3a3a3;
+  --neutral-06: #737373;
+  --neutral-07: #525252;
+  --neutral-08: #262626;
+  --neutral-09: #171717;
+
+  /* ===== 主色 10 级色板（浅色模式，参考 Ant Design 拂晓蓝） =====
+     使用方法：
+     - colorPrimary = color-6（主色）
+     - colorPrimaryBg = color-1（最深，背景）
+     - colorPrimaryText = color-10（最浅但用于暗色文字）
+     - hover = color-5, active = color-7
+  */
+  --primary-1: #e6f4ff;
+  --primary-2: #bae0ff;
+  --primary-3: #91caff;
+  --primary-4: #69b1ff;
+  --primary-5: #4096ff;
+  --primary-6: #1677ff;  /* 主色 */
+  --primary-7: #0958d9;
+  --primary-8: #003eb3;
+  --primary-9: #002c8c;
+  --primary-10: #001d66;
+
+  /* 主色快捷别名 */
+  --primary: var(--primary-6);
+  --primary-hover: var(--primary-5);
+  --primary-active: var(--primary-7);
+  --primary-bg: var(--primary-1);
+  --primary-border: var(--primary-3);
+
+  /* ===== 语义色（浅色模式） ===== */
+  --success: #52c41a;
+  --success-bg: #f6ffed;
+  --success-border: #b7eb8f;
+
+  --warning: #faad14;
+  --warning-bg: #fffbe6;
+  --warning-border: #ffe58f;
+
+  --error: #ff4d4f;
+  --error-bg: #fff2f0;
+  --error-border: #ffccc7;
+
+  --info: #1677ff;
+  --info-bg: #e6f4ff;
+  --info-border: #91caff;
+
+  /* ===== 字体 ===== */
+  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
+    'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', 'SF Mono', Menlo, monospace;
+
+  /* ===== 字号（三阶系统） ===== */
+  --text-xs: 11px;   /* 元数据、标签、辅助信息 */
+  --text-sm: 12px;   /* 正文默认 */
+  --text-base: 14px; /* 标题、强调 */
+  --text-md: 16px;
+  --text-lg: 18px;
+  --text-xl: 20px;
+  --text-2xl: 24px;
+
+  --leading-tight: 1.3;
+  --leading-normal: 1.5;
+  --leading-relaxed: 1.6;
+
+  --weight-normal: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --weight-bold: 700;
+
+  /* ===== 圆角 ===== */
+  --radius-xs: 2px;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+  --radius-full: 9999px;
+
+  /* ===== 阴影（浅色模式） ===== */
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-sm: 0 2px 4px rgba(0, 0, 0, 0.06);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.12);
+  --shadow-xl: 0 16px 48px rgba(0, 0, 0, 0.16);
+
+  /* ===== 动效（参考 Vercel：安静到达，安静离开） ===== */
+  --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-decelerate: cubic-bezier(0, 0, 0.2, 1);   /* 进入：减速，安静到位 */
+  --ease-accelerate: cubic-bezier(0.4, 0, 1, 1);    /* 退出：加速，快速消失 */
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1); /* 仅强调元素 */
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+
+  --duration-micro: 120ms;
+  --duration-fast: 150ms;
+  --duration-base: 200ms;
+  --duration-slow: 250ms;
+
+  /* ===== Z-Index ===== */
+  --z-base: 0;
+  --z-dropdown: 100;
+  --z-sticky: 200;
+  --z-overlay: 300;
+  --z-modal: 400;
+  --z-toast: 500;
+  --z-tooltip: 600;
+
+  /* ===== 尺寸约束 ===== */
+  --header-height: 44px;
+  --toolbar-height: 40px;
+  --input-height-sm: 28px;
+  --input-height-md: 32px;
+  --button-height-sm: 28px;
+  --button-height-md: 32px;
+  --list-item-height: 36px;
+}
+
+/* ============================================================
+   Dark Mode Token 覆盖（v3.0 核心改进）
+   
+   设计原则（来自 Ant Design 暗黑模式规范）：
+   1. 背景用 #141414（暖灰），非纯黑——长时间使用不疲劳
+   2. 主色在暗色下用色阶6但稍亮，确保可读性
+   3. 语义色背景用低透明度叠加（非纯色块），与暗背景融合
+   4. 中性色阶反转但不简单镜像——暗色下浅色差更小
+   ============================================================ */
+[data-theme="dark"] {
+  /* 中性色（暗色模式，反转但调整——暗色下层级差更微妙） */
+  --neutral-00: #141414;  /* 主背景 — 暖灰，非纯黑 */
+  --neutral-01: #1f1f1f;  /* 悬浮表面 */
+  --neutral-02: #2a2a2a;  /* 卡片/hover */
+  --neutral-03: #333333;  /* 边框 */
+  --neutral-04: #404040;  /* 边框 hover */
+  --neutral-05: #595959;  /* 禁用文字 */
+  --neutral-06: #8c8c8c;  /* 辅助文字 */
+  --neutral-07: #bfbfbf;  /* 次要文字 */
+  --neutral-08: #d9d9d9;  /* 主文字 */
+  --neutral-09: #ffffff;  /* 强调文字 */
+
+  /* 主色 10 级色板（暗色模式）
+     参考 Ant Design：主色 #1677ff 在 #141414 背景上生成的暗色色板
+     色阶6是主色，比浅色稍亮确保可读 */
+  --primary-1: #111d2c;
+  --primary-2: #112a45;
+  --primary-3: #15395b;
+  --primary-4: #164c7e;
+  --primary-5: #1765ad;
+  --primary-6: #177ddc;   /* 暗色主色 — 比浅色稍亮 */
+  --primary-7: #3c9ae8;
+  --primary-8: #65b7f3;
+  --primary-9: #8dcff8;
+  --primary-10: #b7e3fa;  /* 最浅 — 用于暗色上的文字/图标 */
+
+  /* 语义色（暗色模式）
+     背景：用主色 + 15% 透明度，而非纯色块
+     文字：用色阶偏亮的值 */
+  --success: #49aa19;
+  --success-bg: rgba(73, 170, 25, 0.15);
+  --success-border: rgba(73, 170, 25, 0.3);
+
+  --warning: #d89614;
+  --warning-bg: rgba(216, 150, 20, 0.15);
+  --warning-border: rgba(216, 150, 20, 0.3);
+
+  --error: #dc4446;
+  --error-bg: rgba(220, 68, 70, 0.12);
+  --error-border: rgba(220, 68, 70, 0.3);
+
+  --info: #177ddc;
+  --info-bg: rgba(23, 125, 220, 0.15);
+  --info-border: rgba(23, 125, 220, 0.3);
+
+  /* 阴影（暗色模式 — 更深更柔和） */
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.2);
+  --shadow-sm: 0 2px 4px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.5);
+  --shadow-xl: 0 16px 48px rgba(0, 0, 0, 0.6);
+}
+
+/* ============================================================
+   开发者工具专用色板（DevTools Palette）
+   用于：HTTP 方法标签、状态码、JSON 语法高亮
+   ============================================================ */
+:root,
+[data-theme="dark"] {
+  /* HTTP 方法标签（暗色优先，浅色通用） */
+  --method-get: #177ddc;
+  --method-get-bg: rgba(23, 125, 220, 0.12);
+  --method-post: #49aa19;
+  --method-post-bg: rgba(73, 170, 25, 0.12);
+  --method-put: #d89614;
+  --method-put-bg: rgba(216, 150, 20, 0.12);
+  --method-delete: #dc4446;
+  --method-delete-bg: rgba(220, 68, 70, 0.12);
+  --method-patch: #b37feb;
+  --method-patch-bg: rgba(179, 127, 235, 0.12);
+
+  /* JSON 语法高亮 */
+  --json-key: #177ddc;
+  --json-string: #95de64;
+  --json-number: #ffc53d;
+  --json-boolean: #ff7875;
+  --json-null: #8c8c8c;
+}

@@ -70,6 +70,45 @@ export interface AnchorDefinition {
 }
 
 /**
+ * 单条评审项（由 skill 在 anchor 配置中注入，模型/脚本都不能增删）
+ */
+export interface ReviewItem {
+    /** 评审项 ID（稳定标识，用于比对结论完整性） */
+    id: string
+    /** 评审规则描述（给模型看的判定标准） */
+    rule: string
+    /**
+     * 判定方式：
+     * - 'script': 确定性规则，由脚本跑 command 判 exit code（引擎重跑核对，不信模型）
+     * - 'model':  主观质量，由模型逐条给 verdict + evidence（脚本卡形式不卡内容）
+     */
+    mode: 'script' | 'model'
+    /** mode='script' 时的判定命令（exit 0 = pass） */
+    command?: string
+    /** 是否为阻断项：fail 时禁止推进（默认 true）；false = 仅告警记录 */
+    blocking?: boolean
+}
+
+/**
+ * 结构化质量评审配置
+ *
+ * 通用机制：引擎只强制"评审动作"（逐条评+留痕+卡形式），不含任何业务规则。
+ * checklist 的具体内容由 skill 在 anchor.config 里注入——
+ * 前端组件一套、后端接口一套、DB schema 一套，引擎不认识这些概念。
+ *
+ * 评审结论产物（ReviewConclusion）由模型/脚本写入 output 指定的文件，
+ * 引擎在 verify 时读取并校验四道形式门禁（见 verify.ts runReviewCheck）。
+ */
+export interface ReviewConfig {
+    /** 评审项清单（由 skill 注入，模型/脚本都不能增删） */
+    checklist: ReviewItem[]
+    /** 评审结论产物路径（相对 cwd，模型/脚本写入，引擎校验） */
+    output: string
+    /** 是否要求每个 model 项都带证据（行号/符号名），默认 true */
+    requireEvidence?: boolean
+}
+
+/**
  * 验证配置
  * 多个验证器 AND 关系，全部通过才算 PASS
  */
@@ -78,6 +117,15 @@ export interface AnchorVerify {
     schema?: JSONSchema
     /** 跑 ESLint（可指定 files） */
     lint?: boolean | { files?: string[] }
+    /**
+     * 跑 ESLint 自动修复（npx nut lint fix --write），在 lint run 之前同步执行。
+     *
+     * 铁律 1 要求：编码 → fix → run → 0 错误。
+     * 将 fix 纳入引擎验证管道，模型无法跳过——
+     * 引擎在 verify 时自动执行 fix，再跑 lint run 检测剩余错误。
+     * 修复操作会修改文件，必须在命令类校验（lint run / tsc）之前完成。
+     */
+    lintFix?: boolean | { files?: string[] }
     /** 跑 tsc --noEmit */
     tsc?: boolean
     /** 跑 Stylelint */
@@ -92,6 +140,69 @@ export interface AnchorVerify {
     producesExist?: boolean
     /** 产物 mtime 校验：必须晚于本阶段"当前一轮"开始（防复用旧文件） */
     producesFresh?: boolean
+    /** 文件规模校验：行数/函数行数/圈复杂度（独立于 ESLint） */
+    fileSize?:
+        | boolean
+        | { maxFileLines?: number; maxFunctionLines?: number; maxComplexity?: number }
+    /** Prettier 格式化校验（独立于 ESLint 的 prettier 插件） */
+    prettier?: boolean | { files?: string[] }
+
+    /**
+     * 结构化质量评审（通用骨架，checklist 内容由 skill 注入）
+     *
+     * 引擎只负责：强制逐条评审 + 结论留痕 + 卡评审形式完整性。
+     * 质量标准本身由 skill 在 checklist 里定义，引擎不含任何业务规则。
+     * 详见 ReviewConfig。
+     */
+    review?: ReviewConfig
+
+    /**
+     * 产出型脚本：在文件类校验（producesExist/producesFresh/schema）之前串行执行。
+     *
+     * 用于"客观输入先行"场景（如 inventory 清单 anchor）：脚本产出 produces
+     * 声明的文件，引擎再校验存在性/新鲜度/结构。
+     *
+     * 解决原架构"文件类校验先于 custom"导致的死锁——
+     * 首次进入时产物尚不存在，producesExist 即失败，custom（产出脚本）被跳过。
+     *
+     * 与 autoEmit 配合可实现"模型不参与判断"的客观 anchor。
+     */
+    produceScripts?: string[]
+
+    /**
+     * 自动 emit：produceScripts 全部成功后，引擎按 key→path 自动产出 artifact。
+     *
+     * 免除模型手动调 `nut ads emit` 的负担，让客观 anchor 真正零模型参与。
+     * key = artifact key（供下游 consumes 引用），path = 产物文件路径（相对 cwd）。
+     *
+     * 仅在 doNext（推进）时触发；check（手动验证）不触发，避免副作用。
+     */
+    autoEmit?: Record<string, string>
+
+    /**
+     * 产物是否允许模型直接写（默认 true）。
+     *
+     * false = 产物应由 produceScripts 产出，模型不应直接写。
+     * 配置约束：modelWritable:false 时必须配 produceScripts，否则引擎报配置错误。
+     * 防伪本质靠 produceScripts 在 verify 重跑覆盖；此字段为声明性约束 + 配置自检。
+     */
+    modelWritable?: boolean
+}
+
+/**
+ * verify 钩子（引擎注入，供 verify 内部回调引擎能力）
+ *
+ * 当前用于 autoEmit：produceScripts 成功后，引擎通过 emit 回调
+ * 更新 state.artifacts 并持久化（由 doNext 注入实现）。
+ */
+export interface VerifyHooks {
+    /** 产出型脚本成功后自动 emit artifact（更新 state + 持久化） */
+    emit?: (artifact: {
+        key: string
+        kind: 'file' | 'value'
+        path?: string
+        value?: unknown
+    }) => void
 }
 
 // ==================== 状态机 ====================
@@ -182,6 +293,30 @@ export interface Artifact {
     value?: unknown
     /** 产出时间 */
     producedAt: string
+}
+
+// ==================== 质量评审结论产物 ====================
+
+/**
+ * 单条评审结论（模型/脚本写入 ReviewConfig.output 指定的文件）
+ */
+export interface ReviewVerdict {
+    /** 评审项 ID（对应 ReviewItem.id） */
+    id: string
+    /** 判定方式（对应 ReviewItem.mode） */
+    mode: 'script' | 'model'
+    /** 结论：pass / fail */
+    verdict: 'pass' | 'fail'
+    /** 证据（行号/符号名/脚本输出摘要；model 项必填，script 项可选） */
+    evidence?: string
+}
+
+/**
+ * 评审结论产物（写入 ReviewConfig.output 指定的文件）
+ */
+export interface ReviewConclusion {
+    /** 评审项结论列表（数量须与 ReviewConfig.checklist 一致） */
+    verdicts: ReviewVerdict[]
 }
 
 // ==================== 验证结果 ====================
@@ -299,7 +434,16 @@ export interface LogEntry {
     /** 阶段 */
     stage: string
     /** 动作类型 */
-    action: 'init' | 'advance' | 'verify' | 'done' | 'subtask' | 'artifact' | 'escalate' | 'cleanup' | 'reset'
+    action:
+        | 'init'
+        | 'advance'
+        | 'verify'
+        | 'done'
+        | 'subtask'
+        | 'artifact'
+        | 'escalate'
+        | 'cleanup'
+        | 'reset'
     /** 验证结果 */
     verifyResult?: VerifyResult
     /** 消息 */

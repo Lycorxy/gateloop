@@ -31,6 +31,10 @@ import { SnapshotManager, SafetyNet } from './backup'
 import { GitOperator } from './operations'
 import { DiffViewer } from './diff'
 import { SSHManager } from './ssh'
+import { AuthService } from './auth'
+import { RemoteService } from './remote'
+import { SshRemoteService } from './ssh-remote'
+import { BranchService } from './branch'
 import { isGitRepo, getGitRoot, getCurrentBranch, getHeadCommit, isWorktreeClean } from './executor'
 import { checkLineEndings, fixLineEndings, setupGitAttributes } from './line-ending'
 import type {
@@ -63,6 +67,14 @@ export class GitManager {
     diffViewer: DiffViewer
     /** SSH 管理器 */
     sshManager: SSHManager
+    /** 授权服务（OAuth device flow + token 缓存） */
+    authService: AuthService
+    /** 远程 MR 服务（GitLab API） */
+    remoteService: RemoteService
+    /** SSH Key 远程服务（工蜂 API：注册/查询/删除/验证） */
+    sshRemoteService: SshRemoteService
+    /** 分支服务（版本管理 + release/feature 命名） */
+    branchService: BranchService
 
     private config: Required<GitManagerConfig>
     private initialized: boolean = false
@@ -87,6 +99,10 @@ export class GitManager {
         )
         this.diffViewer = new DiffViewer(this.config.cwd)
         this.sshManager = new SSHManager(this.config.cwd)
+        this.authService = new AuthService()
+        this.remoteService = new RemoteService()
+        this.sshRemoteService = new SshRemoteService()
+        this.branchService = new BranchService(this.config.cwd)
     }
 
     /**
@@ -265,9 +281,7 @@ export class GitManager {
      * // 或发现问题
      * await git.safetyNetReject()
      */
-    async safetyNetCapture(description: string): Promise<
-        GitResult
-    > {
+    async safetyNetCapture(description: string): Promise<GitResult> {
         this.ensureReady()
         const startTime = Date.now()
 
@@ -477,6 +491,224 @@ export class GitManager {
         return this.sshManager.showPublicKey(hostOrPlatform)
     }
 
+    // ==================== SSH Key 远程管理 ====================
+
+    /**
+     * 查询已注册的 SSH Key 列表
+     *
+     * 自动读取本地缓存的 token；无 token 时返回空列表。
+     *
+     * @example
+     * const keys = await git.listSSHKeys()
+     * keys.forEach(k => console.log(k.id, k.title, k.createdAt))
+     */
+    async listSSHKeys(): Promise<
+        Array<{ id: number; title: string; key: string; createdAt: string }>
+    > {
+        return this.sshRemoteService.listKeys()
+    }
+
+    /**
+     * 删除远程平台上的 SSH Key
+     *
+     * 调用 DELETE /api/v3/user/keys/:id（幂等）。
+     *
+     * @param id Key ID（从 listSSHKeys 获取）
+     * @returns 是否删除成功
+     *
+     * @example
+     * const keys = await git.listSSHKeys()
+     * await git.deleteSSHKey(keys[0].id)
+     */
+    async deleteSSHKey(id: number): Promise<boolean> {
+        return this.sshRemoteService.deleteKey(id)
+    }
+
+    /**
+     * 验证当前 token 是否有效
+     *
+     * 调用 GET /api/v3/user 验证 token，返回用户信息。
+     *
+     * @example
+     * const result = await git.verifyToken()
+     * if (result.valid) console.log(result.username)
+     */
+    async verifyToken(): Promise<{
+        valid: boolean
+        username?: string
+        name?: string
+        userId?: number
+        error?: string
+    }> {
+        return this.sshRemoteService.verifyToken()
+    }
+
+    /**
+     * 清理本地 SSH 配置（密钥文件 + config 块）
+     *
+     * 删除指定平台的密钥对，并从 ~/.ssh/config 移除对应 Host 块。
+     * 不删除远程平台上的公钥（如需删除远程 Key，用 deleteSSHKey）。
+     *
+     * @param platform 平台名（默认 gitcode）
+     * @param account 多帐号标识（可选）
+     *
+     * @example
+     * await git.cleanSSH('gitcode')
+     */
+    async cleanSSH(platform?: string, account?: string): Promise<GitResult> {
+        return this.sshManager.clean(platform, account)
+    }
+
+    // ==================== 授权（OAuth + Token） ====================
+
+    /**
+     * 触发 OAuth 授权流程（弹浏览器让用户授权）
+     *
+     * 授权后 token 缓存到 ~/.gfrc（300 天有效）。
+     * 后续所有远程操作自动使用缓存 token。
+     */
+    async login(): Promise<string | null> {
+        return this.authService.login()
+    }
+
+    /**
+     * 确保 token 可用（取本地缓存或触发授权）
+     *
+     * 远程操作前调用此方法确保已授权。
+     * @returns token；失败返回空字符串
+     */
+    async ensureToken(): Promise<string> {
+        return this.authService.ensureToken()
+    }
+
+    /** 获取本地缓存的 token（不触发授权） */
+    async getToken(): Promise<string | null> {
+        return this.authService.getToken()
+    }
+
+    /** 清除本地 token（登出） */
+    async logout(): Promise<GitResult> {
+        return this.authService.logout()
+    }
+
+    // ==================== 远程 MR 管理 ====================
+
+    /**
+     * 创建 Merge Request
+     *
+     * 自动使用缓存 token；无 token 时自动触发授权。
+     *
+     * @example
+     * await git.createMR({
+     *   sourceBranch: 'feature/login_v1.0.0',
+     *   targetBranch: 'release/v1.0.0',
+     *   title: 'feat: 登录功能'
+     * })
+     */
+    async createMR(options: {
+        sourceBranch: string
+        targetBranch: string
+        title: string
+        reviewerIds?: number[]
+    }): Promise<{ success: boolean; url?: string; manualUrl?: string; error?: string }> {
+        return this.remoteService.createMR(options)
+    }
+
+    /** 检查 MR 是否已存在（防重复创建） */
+    async checkMRExists(sourceBranch: string, targetBranch: string): Promise<boolean> {
+        return this.remoteService.checkMRExists(sourceBranch, targetBranch)
+    }
+
+    /** 列出 MR（opened/merged/closed/all） */
+    async listMRs(state?: 'opened' | 'merged' | 'closed' | 'all'): Promise<
+        Array<{
+            iid: number
+            title: string
+            state: string
+            sourceBranch: string
+            targetBranch: string
+            author: string
+            webUrl: string
+        }>
+    > {
+        return this.remoteService.listMRs(state)
+    }
+
+    /** 获取当前项目的远程路径（如 kfweb/my-project） */
+    async getProjectId(): Promise<string> {
+        return this.remoteService.getProjectId()
+    }
+
+    // ==================== 分支策略（版本管理 + release/feature） ====================
+
+    /** 获取当前目录的 package.json 信息 */
+    async getCurrentProjectInfo(): Promise<{
+        name: string
+        path: string
+        pkgPath: string
+        version: string
+    } | null> {
+        return this.branchService.getCurrentProjectInfo()
+    }
+
+    /** 检测 Monorepo 子项目的 projectKey */
+    detectProjectKey(): string | undefined {
+        return this.branchService.detectProjectKey()
+    }
+
+    /** 获取远程最新版本号（扫描远程分支和 tags） */
+    async getLatestVersion(projectKey?: string): Promise<string> {
+        return this.branchService.getLatestVersion(projectKey)
+    }
+
+    /**
+     * 创建 release + feature 分支（一步完成）
+     *
+     * @param options.version 版本号（如 1.2.0）
+     * @param options.featureDesc 功能描述（如 user-login）
+     * @param options.projectKey Monorepo 项目 key（可选）
+     * @param options.useRelease 是否创建 release 分支（false 则 feature 直接基于 master）
+     */
+    async createReleaseFeatureBranches(options: {
+        version: string
+        featureDesc: string
+        projectKey?: string
+        useRelease: boolean
+    }): Promise<{
+        releaseBranch: string
+        featureBranch: string
+        version: string
+        featureDesc: string
+    } | null> {
+        return this.branchService.createReleaseFeatureBranches(options)
+    }
+
+    /** 提交 package.json 版本号变更并推送 */
+    async commitVersionChange(
+        pkgPath: string,
+        version: string,
+        projectKey?: string
+    ): Promise<boolean> {
+        return this.branchService.commitVersion(pkgPath, version, projectKey)
+    }
+
+    /** 删除远程分支（+本地） */
+    async deleteRemoteBranch(branchName: string, deleteLocal?: boolean): Promise<boolean> {
+        return this.branchService.deleteBranch(branchName, deleteLocal)
+    }
+
+    /** 列出可管理的远程分支（匹配 release/feature 命名规范） */
+    async listManagedBranches(projectKey?: string): Promise<
+        Array<{
+            name: string
+            type: 'release' | 'feature'
+            version: string
+            featureDesc?: string
+        }>
+    > {
+        return this.branchService.listManagedBranches(projectKey)
+    }
+
     // ==================== 统计信息 ====================
 
     /** 获取管理器统计信息 */
@@ -522,7 +754,43 @@ export { SnapshotManager, SafetyNet } from './backup'
 export { GitOperator } from './operations'
 export { DiffViewer } from './diff'
 export { SSHManager } from './ssh'
-export { setupSSH, setupMultiAccountSSH, troubleshootSSH, checkSSHStatus, showSSHKey } from './ssh'
+export { AuthService } from './auth'
+export { RemoteService } from './remote'
+export { SshRemoteService } from './ssh-remote'
+export { BranchService } from './branch'
+export {
+    setupSSH,
+    setupMultiAccountSSH,
+    troubleshootSSH,
+    checkSSHStatus,
+    showSSHKey,
+    cleanSSH
+} from './ssh'
+export { getToken, saveToken, ensureToken, oauthLogin, clearToken } from './auth'
+export { uploadKey, listKeys, deleteKey, verifyToken } from './ssh-remote'
+export { createMR, checkMRExists, listMRs, getProjectId } from './remote'
+export {
+    parseVersion,
+    formatVersion,
+    compareVersion,
+    getNextVersion,
+    getCurrentProjectInfo,
+    detectProjectKey,
+    getReleaseName,
+    getFeatureName,
+    parseBranchInfo,
+    getLatestVersionFromRemote,
+    hasRemoteBranch,
+    hasLocalBranch,
+    createAndPushBranch,
+    commitVersionChange,
+    deleteRemoteBranch,
+    listManagedBranches
+} from './branch'
+export type { GitLabToken } from './auth'
+export type { MRState, CreateMROptions, MRInfo, CreateMRResult } from './remote'
+export type { SSHKeyInfo, UploadKeyResult, VerifyTokenResult } from './types'
+export type { VersionInfo, VersionBumpType, ProjectInfo, BranchResult, BranchInfo } from './branch'
 export {
     gitExec,
     gitExecOrThrow,
