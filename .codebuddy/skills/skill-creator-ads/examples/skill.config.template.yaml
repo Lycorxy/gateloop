@@ -11,7 +11,7 @@ trigger-keywords:
     - keyword3
 
 # ── 依赖关系 ──
-# 规则注入方式由 Phase 3 决定（ADS harness / RULE.mdc alwaysApply / use_skill）
+# 规则注入方式由 Phase 3 决定（GateLoop harness / RULE.mdc alwaysApply / use_skill）
 # 一般为空；仅当显式依赖其他 skill 协作时才声明
 depends-on: []
 mutual-exclude: []

@@ -213,7 +213,7 @@
 Phase 3 已决定规则注入方式（三选一）：
 
 ```
-├── A. ADS harness 模式（推荐）→ 引擎 reads + rulesInline 内联，无需 Step 0
+├── A. GateLoop harness 模式（推荐）→ 引擎 reads + rulesInline 内联，无需 Step 0
 │   └── 在 anchor.config.json 的 reads 中声明 RULE.mdc
 │       引擎推进到该 anchor 时自动读取并内联到指令 JSON
 │
@@ -225,15 +225,15 @@ Phase 3 已决定规则注入方式（三选一）：
     └── 在 SKILL.md Step 0 中显式 use_skill("<rule-engine-skill>")
 ```
 
-**何时用 A？** skill 由 ADS harness 驱动（如 frontend-design / css-style-writer / frontend-codegen）
+**何时用 A？** skill 由 GateLoop harness 驱动（如 frontend-design / css-style-writer / frontend-codegen）
 **何时用 B？** skill 独立运行，规则需常驻 System Prompt（如 code-review-check）
-**何时用 C？** skill 依赖其他 skill 协作，且无 ADS harness 接管
+**何时用 C？** skill 依赖其他 skill 协作，且无 GateLoop harness 接管
 
 **播报完成消息（仅 C 模式需要）：**
 
 ```
 ✅ [Step 0] 规则注入完成
-  ▸ 注入方式：{ADS harness reads / RULE.mdc alwaysApply / use_skill 显式}
+  ▸ 注入方式：{GateLoop harness reads / RULE.mdc alwaysApply / use_skill 显式}
   ▸ 规则内容已就绪
 ```
 

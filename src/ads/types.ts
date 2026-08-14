@@ -37,6 +37,46 @@ export interface AnchorManifest {
     maxAttempts?: number
     /** 工作目录，默认 process.cwd() */
     cwd?: string
+
+    /**
+     * ★ 编排层：任务决策记忆配置
+     *
+     * 管的是「决策事实」——跨任务/跨轮沉淀的结论（需求分析结论、架构选型、项目约定）。
+     * 不是「经验记忆」（solution/pitfall/convention 那类语义召回的经验）——
+     * 那是经验记忆系统的职责，两者数据模型与检索模型不同，刻意不合并。
+     *
+     * 区别于 artifact：artifact 是任务内数据管道，任务 done 后随 scratch 清理；
+     * 决策记忆跨任务存活，下个工程/下一轮能精确读到。
+     *
+     * 引擎在 anchor 的 readsMemory 时读入内联进指令，writesMemory 时校验已回写。
+     * 本地 JSON 为唯一确定性事实源，MemoryHooks 可选增强但不绑定特定服务。
+     */
+    memory?: MemoryConfig
+
+    /**
+     * ★ 编排层：非线性跳转的环检测阈值（同一 anchor 被跳入的最大次数），默认 3。
+     *
+     * onPass/onEscalate 引入了非线性编排（设计不通过跳回需求、部署失败回滚质检），
+     * 为防死循环，引擎记录每个 anchor 的跳入次数，超阈值强制熔断。
+     */
+    maxJumps?: number
+}
+
+/**
+ * ★ 任务决策记忆配置
+ *
+ * 通用机制：引擎只管"读入内联 + 回写校验"的形式契约，不含任何业务语义。
+ * 本地 JSON 永远是唯一确定性事实源；mcp=true 时上层可注入 MemoryHooks 做增强，
+ * 但引擎不依赖任何特定 MCP 服务，未注入时降级到本地文件。
+ */
+export interface MemoryConfig {
+    /** 本地兜底存储文件（相对 cwd），默认 .specflow/memory/store.json */
+    localStore?: string
+    /**
+     * 是否接 MCP（真实读写由上层注入 MemoryHooks；未注入时降级到 localStore）。
+     * 引擎侧只是声明"期望走 MCP"，保证 MCP 缺失时 skill 仍独立可用。
+     */
+    mcp?: boolean
 }
 
 /**
@@ -67,6 +107,59 @@ export interface AnchorDefinition {
     verify?: AnchorVerify
     /** 子代理提示词模板（可选，用于派 code-explorer 子上下文） */
     subagentPrompt?: string
+
+    /**
+     * ★ 补丁C（编排层）：本 anchor 委派执行的子 skill 名。
+     *
+     * 编排层（flow.config.json）用这个字段表达"这个阶段交给某个子 skill 完成"。
+     * 引擎不信"模型说调了 skill"，而是通过本 anchor 的 verify（校验该 skill 的
+     * 确定性产物：产物文件 fresh / tsc / lint / review 结论）来证明 skill 真跑了。
+     *
+     * 仅作声明与提示（内联进 brief 提示模型 use_skill），硬门禁仍落在 verify。
+     */
+    delegateSkill?: string
+
+    /**
+     * ★ 编排层：本 anchor 启动时读入的决策记忆 key 列表（精确 key，非语义搜索）。
+     *
+     * 类比 consumes：引擎从决策记忆 store 按 key 精确读出内容，内联进指令，
+     * 模型不需要自己去找上一个工程留下的决策结论。MCP 缺失时从 localStore 读。
+     * 注意：这里要的是"确定性命中"（给定 key 必返回对应值），
+     * 不是经验记忆那种"语义召回 topK"——故不走经验记忆系统。
+     */
+    readsMemory?: string[]
+
+    /**
+     * ★ 编排层：本 anchor 完成时必须回写的决策记忆 key 列表。
+     *
+     * 类比 emits：推进时引擎校验这些 key 已写入决策记忆 store（未写则不许推进），
+     * 保证"本轮决策结论沉淀下来"这件事不被模型跳过——确定的交给脚本。
+     */
+    writesMemory?: string[]
+
+    /**
+     * ★ 通用钩子层：声明读入哪些上游 anchor 的上下文存档。
+     *
+     * 引擎自动存档每个 anchor 完成时的完整执行上下文（入参/出参/验证结果），
+     * 下游声明 readsContext 即可读到——防多 skill 协作时信息衰减。
+     * 类比 consumes（传 artifact 文件内容），readsContext 传的是"上下文链"。
+     */
+    readsContext?: string[]
+
+    /**
+     * ★ 补丁B（编排层）：验证通过后跳转的目标 anchor id（默认下一个）。
+     *
+     * 支持非线性编排的正向跳转（如条件分支）。目标必须是 manifest 内已声明的 id。
+     */
+    onPass?: string
+
+    /**
+     * ★ 补丁B（编排层）：熔断后跳转的目标 anchor id（默认停在 escalate）。
+     *
+     * 用于回滚/降级（如部署失败回退到质检、设计不通过跳回需求）。
+     * 引擎带环检测（maxJumps），超阈值强制停在 escalate 防死循环。
+     */
+    onEscalate?: string
 }
 
 /**
@@ -257,6 +350,8 @@ export interface StageRecord {
     escalated?: boolean
     /** 运行时动态拆分的子任务 */
     subtasks?: SubTask[]
+    /** ★ 补丁B：本 anchor 被跳入的次数（环检测用，超 maxJumps 强制熔断） */
+    jumpCount?: number
 }
 
 /**
@@ -361,6 +456,12 @@ export interface AnchorInstruction {
     rulesInline?: RuleInline[]
     /** 内联的上游 artifact 内容（consumes 声明的数据，模型不需要自己找） */
     artifactsInline?: ArtifactInline[]
+    /** ★ 补丁A：内联的决策记忆内容（readsMemory 声明的 key，模型不需要自己找） */
+    memoryInline?: MemoryInline[]
+    /** ★ 通用钩子层：beforeAnchor 钩子注入的上下文（影响分析/知识库/figma解析等） */
+    contextInline?: ContextItem[]
+    /** ★ 通用钩子层：readsContext 声明的上游上下文存档（防信息衰减的上下文链） */
+    contextArchiveInline?: ContextArchive[]
     /** 本阶段产出的文件列表 */
     produces?: string[]
     /** 本阶段需要产出的 artifact key */
@@ -417,6 +518,159 @@ export interface ArtifactInline {
     path?: string
     /** 内容（file 为文件内容，value 为序列化值） */
     content: string
+}
+
+/**
+ * ★ 补丁A：内联决策记忆（readsMemory 读出的 key 内容）
+ */
+export interface MemoryInline {
+    /** 记忆 key */
+    key: string
+    /** 内容（JSON 序列化值） */
+    content: string
+}
+
+// ==================== 通用生命周期钩子（编排层） ====================
+
+/**
+ * ★ 通用上下文项（钩子产出的信息单元）
+ *
+ * 统一的信息注入格式：无论来自记忆系统、知识库、figma-to-code、代码影响分析，
+ * 都产出 ContextItem，引擎统一内联进指令。引擎不关心内容语义，只管注入。
+ */
+export interface ContextItem {
+    /** 来源标记（如 "impact-analysis" / "knowledge-base" / "figma" / "memory"） */
+    source: string
+    /** 内容（文本，可直接内联进指令给模型看） */
+    content: string
+    /** 类型标签（仅供展示分类，如 "analysis" / "knowledge" / "memory" / "design"） */
+    kind?: string
+}
+
+/**
+ * ★ 钩子上下文（传给钩子函数的运行时信息）
+ *
+ * 引擎在调 beforeAnchor/afterAnchor 时构建，让外部系统拿到当前状态。
+ */
+export interface HookContext {
+    /** 当前 anchor id */
+    anchorId: string
+    /** anchor 名称 */
+    anchorName?: string
+    /** 工作目录 */
+    cwd: string
+    /** 当前状态快照（只读） */
+    state: AnchorState
+    /** 当前 anchor 消费的上游 artifact（完整内容） */
+    artifacts: Record<string, Artifact>
+    /** 当前 anchor 定义（只读） */
+    anchor: AnchorDefinition
+}
+
+/**
+ * ★ 生命周期钩子（上层注入，引擎只认契约）
+ *
+ * 通用接入点：记忆系统、上下文系统、知识库、figma-to-code、代码影响分析等，
+ * 都通过这两个钩子接入 ADS 流程，保证多 skill/多 agent 协作时信息不衰减。
+ *
+ * 设计原则（与 MemoryHooks 一致）：
+ *   - 可选注入：未注入时引擎降级跳过，skill 照样独立可用
+ *   - 引擎不含业务语义：钩子做什么由上层决定，引擎只管调用 + 内联
+ *   - 不绑定特定服务：上层注入什么系统就接什么系统
+ */
+export interface AnchorHooks {
+    /**
+     * anchor 开始前调用：返回的 ContextItem 会被内联进指令。
+     *
+     * 典型用途：
+     *   - 代码影响分析：分析当前 anchor 要改的文件影响哪些模块
+     *   - 知识库检索：按当前 anchor 的 brief 语义搜索相关文档
+     *   - figma-to-code：解析设计稿产出 DOM+Style 上下文
+     *   - 经验记忆：语义搜索相关经验（区别于 readsMemory 的精确 key）
+     */
+    beforeAnchor?: (ctx: HookContext) => Promise<ContextItem[] | undefined>
+    /**
+     * anchor 完成后调用（verify 通过后）：接收完整执行上下文供存档。
+     *
+     * 典型用途：
+     *   - 经验记忆写入：把本轮解决问题的经验写入记忆系统
+     *   - 上下文存档：把执行上下文存到外部系统
+     *   - 知识库更新：把新产出的知识写入知识库
+     *
+     * 注意：引擎本身也会自动存档 ContextArchive（本地 JSONL），
+     * afterAnchor 是给外部系统"额外存一份"的机会。
+     */
+    afterAnchor?: (ctx: HookContext, result: VerifyResult, archive: ContextArchive) => Promise<void>
+    /**
+     * ★ 统一事件流（通知钩子）：节点开始/完成/失败/熔断/流程完成，都走这里。
+     *
+     * 外部系统（业务方）实现这一个接口，即可：
+     *   - 追踪进度：每个节点执行到哪、是否完成（stage_start / stage_complete / done）
+     *   - 出错通知：验证失败、熔断（stage_verify_fail / escalate）
+     *
+     * 与 beforeAnchor/afterAnchor 的区别：onEvent 是纯通知（只读、不返回值、不改流程），
+     * 用于把流程进度/异常实时推给外部（发消息、写监控、调 HTTP 接口、调 MCP）。
+     * 引擎只负责在关键节点触发事件，通知的具体方式由注入方决定。
+     * 后续业务可通过实现该钩子补充任意通知逻辑，无需改引擎。
+     */
+    onEvent?: (event: AnchorEvent) => Promise<void>
+}
+
+/**
+ * ★ 节点事件（统一事件流，供 onEvent 钩子消费）
+ *
+ * 引擎在状态转换的关键节点触发，外部系统通过 onEvent 钩子接收。
+ * 事件是纯通知（只读），外部不能通过它改流程。
+ */
+export type AnchorEventType =
+    | 'stage_start' // 节点开始（进入新阶段）
+    | 'stage_verify_fail' // 节点验证失败（将重试）
+    | 'stage_complete' // 节点完成并推进
+    | 'escalate' // 熔断（连续失败超限）
+    | 'done' // 流程全部完成
+
+export interface AnchorEvent {
+    /** 事件类型 */
+    type: AnchorEventType
+    /** 当前节点 id */
+    stageId: string
+    /** 节点名称 */
+    stageName?: string
+    /** 触发时间 */
+    timestamp: string
+    /** 尝试次数（verify_fail / complete / escalate 时） */
+    attempts?: number
+    /** 错误信息（verify_fail / escalate 时） */
+    errors?: string[]
+    /** 推进到的下一阶段（complete 时） */
+    nextStage?: string
+}
+
+/**
+ * ★ 上下文存档（引擎自动构建，防信息衰减）
+ *
+ * 每个 anchor 完成时，引擎自动把它的完整执行上下文存档到本地 JSONL。
+ * 下游 anchor 通过 readsContext 声明读取，引擎内联进 contextArchiveInline。
+ *
+ * 解决的问题：多 skill/多 agent 协作时，每经过一个 skill 上下文衰减一层——
+ * 最后只剩文件路径，"为什么这么做""验证了什么""考虑过什么"全丢。
+ * 存档管道让信息不衰减反累积。
+ */
+export interface ContextArchive {
+    /** anchor id */
+    anchorId: string
+    /** anchor 名称 */
+    anchorName?: string
+    /** 消费了哪些上游 artifact key */
+    consumed: string[]
+    /** 产出了哪些 artifact key */
+    emitted: string[]
+    /** 产出了哪些文件 */
+    produced: string[]
+    /** 验证了什么（verify 的 checks 清单 + 结果） */
+    verifyChecks: VerifyCheck[]
+    /** 完成时间 */
+    completedAt: string
 }
 
 // ==================== 日志 ====================

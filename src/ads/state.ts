@@ -25,7 +25,12 @@ import type {
     VerifyResult,
     Artifact,
     SubTask,
-    VerifyHooks
+    VerifyHooks,
+    ContextItem,
+    HookContext,
+    AnchorHooks,
+    ContextArchive,
+    AnchorEvent
 } from './types'
 import {
     generateTaskId,
@@ -34,6 +39,7 @@ import {
     gcScratch,
     getWorkspaceDir
 } from './workspace'
+import { readMemory, writeMemory, checkMemoryWritten, type MemoryHooks } from './memory'
 
 const DEFAULT_STATE_DIR = '.specflow'
 const DEFAULT_STATE_FILE = 'anchor-state.json'
@@ -96,7 +102,8 @@ function resolveMaxAttempts(manifest: AnchorManifest, anchor: AnchorDefinition):
 export function initTask(
     manifest: AnchorManifest,
     task: string,
-    cwd: string = manifest.cwd || process.cwd()
+    cwd: string = manifest.cwd || process.cwd(),
+    anchorHooks?: AnchorHooks
 ): AnchorState {
     const now = new Date().toISOString()
     const taskId = generateTaskId()
@@ -145,6 +152,16 @@ export function initTask(
         },
         manifest.logFile
     )
+
+    // ★ 统一事件流：节点开始（第一个阶段）
+    if (firstAnchor) {
+        emitEvent(anchorHooks, {
+            type: 'stage_start',
+            stageId: firstAnchor.id,
+            stageName: firstAnchor.name,
+            timestamp: now
+        })
+    }
 
     return state
 }
@@ -276,8 +293,36 @@ export function emitArtifact(
     return state.artifacts
 }
 
-// ==================== 断点续跑：重置本轮尝试 ====================
+/**
+ * ★ 补丁A：回写一条决策记忆（供 CLI mem-write 命令调用）
+ *
+ * 落本地 store（确定性事实源）+ MCP（若注入）。writesMemory 门禁以本地 store 为准。
+ */
+export async function writeMemoryEntry(
+    manifest: AnchorManifest,
+    key: string,
+    value: unknown,
+    cwd: string = manifest.cwd || process.cwd(),
+    memoryHooks?: MemoryHooks
+): Promise<void> {
+    await writeMemory(key, value, cwd, manifest.memory, memoryHooks)
 
+    const state = readState(cwd, manifest.stateFile)
+    appendLog(
+        cwd,
+        {
+            timestamp: new Date().toISOString(),
+            skill: manifest.name,
+            task: state?.task || '',
+            stage: state?.currentStage || '',
+            action: 'artifact',
+            message: `回写决策记忆: ${key}`
+        },
+        manifest.logFile
+    )
+}
+
+// ==================== 断点续跑：重置本轮尝试 ====================
 /**
  * 标记当前阶段"开始新一轮尝试"，刷新 attemptStartedAt。
  *
@@ -318,7 +363,9 @@ export async function doNext(
         state: AnchorState,
         hooks?: VerifyHooks
     ) => Promise<VerifyResult>,
-    cwd: string = manifest.cwd || process.cwd()
+    cwd: string = manifest.cwd || process.cwd(),
+    memoryHooks?: MemoryHooks,
+    anchorHooks?: AnchorHooks
 ): Promise<AnchorInstruction> {
     const state = readState(cwd, manifest.stateFile)
 
@@ -340,7 +387,15 @@ export async function doNext(
     // ★ 前置门禁 1：子任务闭环校验
     const subtaskError = checkSubtasks(currentAnchor, stageRecord)
     if (subtaskError) {
-        return buildInstruction(manifest, currentAnchor, state, false, subtaskError)
+        return buildInstruction(
+            manifest,
+            currentAnchor,
+            state,
+            false,
+            subtaskError,
+            cwd,
+            memoryHooks
+        )
     }
 
     // ★ 核心防作弊：强制重跑验证
@@ -374,6 +429,9 @@ export async function doNext(
     // ★ 前置门禁 2：emits 校验（并入 verifyResult）
     checkEmits(currentAnchor, verifyResult, state)
 
+    // ★ 前置门禁 3（补丁A）：writesMemory 校验——本 anchor 声明的记忆必须已回写
+    checkMemory(currentAnchor, verifyResult, cwd, manifest.memory)
+
     stageRecord.attempts++
     stageRecord.verifyResult = verifyResult
 
@@ -387,11 +445,22 @@ export async function doNext(
             currentAnchor,
             stageRecord,
             verifyResult,
-            maxAttempts
+            maxAttempts,
+            memoryHooks,
+            anchorHooks
         )
     }
 
-    return handleSuccess(cwd, manifest, state, currentAnchor, stageRecord, verifyResult)
+    return handleSuccess(
+        cwd,
+        manifest,
+        state,
+        currentAnchor,
+        stageRecord,
+        verifyResult,
+        memoryHooks,
+        anchorHooks
+    )
 }
 
 // ==================== doNext 子函数 ====================
@@ -472,22 +541,68 @@ function checkEmits(
 }
 
 /**
+ * 前置门禁 3（补丁A）：writesMemory 校验
+ *
+ * 本 anchor 声明的决策记忆 key 必须已回写本地 store，否则不许推进。
+ * 保证"本轮结论沉淀到跨任务记忆"这件事不被模型跳过（类比 checkEmits）。
+ * 仅在 verify 通过时才检查。
+ */
+function checkMemory(
+    anchor: AnchorDefinition,
+    verifyResult: VerifyResult,
+    cwd: string,
+    memoryConfig: AnchorManifest['memory']
+): void {
+    if (!verifyResult.passed || !anchor.writesMemory || anchor.writesMemory.length === 0) return
+
+    const missing = checkMemoryWritten(anchor.writesMemory, cwd, memoryConfig)
+    if (missing.length > 0) {
+        verifyResult.passed = false
+        verifyResult.errors.push(
+            `未回写声明的记忆: ${missing.join(', ')}（请调用 nut ads mem-write <key> <value>）`
+        )
+        verifyResult.checks.push({
+            name: '记忆回写',
+            passed: false,
+            output: `缺失: ${missing.join(', ')}`
+        })
+    }
+}
+
+/**
  * 处理验证失败：熔断判定 or 记录失败 + 返回修复指令
  */
-function handleFailure(
+async function handleFailure(
     cwd: string,
     manifest: AnchorManifest,
     state: AnchorState,
     anchor: AnchorDefinition,
     stageRecord: StageRecord,
     verifyResult: VerifyResult,
-    maxAttempts: number
-): AnchorInstruction {
+    maxAttempts: number,
+    memoryHooks?: MemoryHooks,
+    anchorHooks?: AnchorHooks
+): Promise<AnchorInstruction> {
     // ★ 熔断判定
     if (stageRecord.attempts >= maxAttempts) {
         stageRecord.status = 'escalated'
         stageRecord.escalated = true
+
+        // ★ 补丁B：熔断跳转（onEscalate）——用于回滚/降级到指定 anchor
+        const jumpInst = tryEscalateJump(cwd, manifest, state, anchor, verifyResult, anchorHooks)
+        if (jumpInst) return jumpInst
+
         writeState(cwd, state, manifest.stateFile)
+
+        // ★ 统一事件流：熔断（出错通知）
+        emitEvent(anchorHooks, {
+            type: 'escalate',
+            stageId: anchor.id,
+            stageName: anchor.name,
+            timestamp: new Date().toISOString(),
+            attempts: stageRecord.attempts,
+            errors: verifyResult.errors
+        })
 
         logStageEvent(
             cwd,
@@ -499,7 +614,16 @@ function handleFailure(
             `连续失败 ${stageRecord.attempts} 次，触发熔断`
         )
 
-        const inst = buildInstruction(manifest, anchor, state, false, verifyResult)
+        const inst = await buildInstruction(
+            manifest,
+            anchor,
+            state,
+            false,
+            verifyResult,
+            cwd,
+            memoryHooks,
+            anchorHooks
+        )
         inst.escalate = true
         inst.nextAction = `🛑 连续失败 ${stageRecord.attempts}/${maxAttempts} 次，已熔断。需人工介入或降级方案。可调用 reset 重来，或修正 manifest 后 retry。`
         return inst
@@ -507,6 +631,16 @@ function handleFailure(
 
     stageRecord.status = 'failed'
     writeState(cwd, state, manifest.stateFile)
+
+    // ★ 统一事件流：节点验证失败（出错通知，将重试）
+    emitEvent(anchorHooks, {
+        type: 'stage_verify_fail',
+        stageId: anchor.id,
+        stageName: anchor.name,
+        timestamp: new Date().toISOString(),
+        attempts: stageRecord.attempts,
+        errors: verifyResult.errors
+    })
 
     logStageEvent(
         cwd,
@@ -518,29 +652,163 @@ function handleFailure(
         `验证失败: ${verifyResult.errors.length} 个错误 (${stageRecord.attempts}/${maxAttempts})`
     )
 
-    return buildInstruction(manifest, anchor, state, false, verifyResult)
+    return buildInstruction(
+        manifest,
+        anchor,
+        state,
+        false,
+        verifyResult,
+        cwd,
+        memoryHooks,
+        anchorHooks
+    )
+}
+
+/**
+ * ★ 补丁B：熔断跳转（onEscalate）
+ *
+ * 声明了 onEscalate 时，熔断不停机，而是跳转到目标 anchor（回滚/降级）。
+ * 带环检测：目标 anchor 被跳入次数超 maxJumps 时放弃跳转、正常停在 escalate 防死循环。
+ *
+ * @returns 成功跳转时返回目标 anchor 的指令；不跳转返回 undefined（走原熔断停机逻辑）
+ */
+function tryEscalateJump(
+    cwd: string,
+    manifest: AnchorManifest,
+    state: AnchorState,
+    anchor: AnchorDefinition,
+    verifyResult: VerifyResult,
+    anchorHooks?: AnchorHooks
+): AnchorInstruction | undefined {
+    if (!anchor.onEscalate) return undefined
+
+    const targetIndex = manifest.anchors.findIndex((a) => a.id === anchor.onEscalate)
+    if (targetIndex < 0) return undefined
+
+    const targetStage = state.stages[targetIndex]
+    if (!targetStage) return undefined
+
+    // 捕获跳转前当前 anchor 的尝试次数（事件上报用，跳转后 index 会变）
+    const currentAttempts = state.stages[state.currentAnchorIndex]?.attempts ?? 0
+
+    // 环检测：目标被跳入次数超阈值 → 放弃跳转，走原停机逻辑
+    const maxJumps = manifest.maxJumps ?? 3
+    const jumps = (targetStage.jumpCount ?? 0) + 1
+    if (jumps > maxJumps) {
+        logStageEvent(
+            cwd,
+            manifest,
+            state,
+            anchor.id,
+            'escalate',
+            verifyResult,
+            `onEscalate 跳转到 ${anchor.onEscalate} 超过 maxJumps=${maxJumps}，放弃跳转，停机熔断`
+        )
+        return undefined
+    }
+
+    const now = new Date().toISOString()
+    // 重置目标 anchor 为新一轮，并回退当前指针
+    targetStage.jumpCount = jumps
+    targetStage.status = 'in_progress'
+    targetStage.attempts = 0
+    targetStage.startedAt = now
+    targetStage.attemptStartedAt = now
+    targetStage.escalated = false
+    state.currentAnchorIndex = targetIndex
+    state.currentStage = manifest.anchors[targetIndex].id
+    writeState(cwd, state, manifest.stateFile)
+
+    // ★ 统一事件流：熔断回滚（出错通知）+ 目标节点重新开始
+    const targetAnchor = manifest.anchors[targetIndex]
+    emitEvent(anchorHooks, {
+        type: 'escalate',
+        stageId: anchor.id,
+        stageName: anchor.name,
+        timestamp: now,
+        attempts: currentAttempts,
+        errors: verifyResult.errors,
+        nextStage: targetAnchor.id
+    })
+    emitEvent(anchorHooks, {
+        type: 'stage_start',
+        stageId: targetAnchor.id,
+        stageName: targetAnchor.name,
+        timestamp: now
+    })
+
+    logStageEvent(
+        cwd,
+        manifest,
+        state,
+        anchor.id,
+        'escalate',
+        verifyResult,
+        `熔断回滚：${anchor.id} → ${anchor.onEscalate}（第 ${jumps}/${maxJumps} 次跳转）`
+    )
+
+    const inst = buildInstructionSync(
+        manifest,
+        manifest.anchors[targetIndex],
+        state,
+        false,
+        undefined
+    )
+    inst.nextAction = `🔄 ${anchor.id} 熔断，已回滚到 ${anchor.onEscalate} 重做（第 ${jumps}/${maxJumps} 次）。按 brief 修复后调用 next。`
+    return inst
+}
+
+/**
+ * ★ 补丁B：解析下一个 anchor 索引（onPass 跳转 or 默认 +1）
+ */
+function resolveNextIndex(
+    manifest: AnchorManifest,
+    state: AnchorState,
+    anchor: AnchorDefinition
+): number {
+    if (anchor.onPass) {
+        return manifest.anchors.findIndex((a) => a.id === anchor.onPass)
+    }
+    return state.currentAnchorIndex + 1
+}
+
+/** 推进日志消息（拆出以避免嵌套三元） */
+function buildAdvanceMessage(
+    anchor: AnchorDefinition,
+    nextAnchor: AnchorDefinition | undefined
+): string {
+    if (!nextAnchor) return '任务完成'
+    if (anchor.onPass) return `跳转到: ${nextAnchor.id}（onPass）`
+    return `推进到: ${nextAnchor.id}`
 }
 
 /**
  * 处理验证成功：标记完成，推进到下一阶段 or 完成任务
  */
-function handleSuccess(
+async function handleSuccess(
     cwd: string,
     manifest: AnchorManifest,
     state: AnchorState,
     anchor: AnchorDefinition,
     stageRecord: StageRecord,
-    verifyResult: VerifyResult
-): AnchorInstruction {
+    verifyResult: VerifyResult,
+    memoryHooks?: MemoryHooks,
+    anchorHooks?: AnchorHooks
+): Promise<AnchorInstruction> {
     const now = new Date().toISOString()
 
     stageRecord.status = 'passed'
     stageRecord.completedAt = now
 
-    const nextIndex = state.currentAnchorIndex + 1
-    const nextAnchor = manifest.anchors[nextIndex]
+    // ★ 补丁B：正向跳转（onPass）——支持非线性编排（条件分支），默认下一个
+    const nextIndex = resolveNextIndex(manifest, state, anchor)
+    const nextAnchor = nextIndex >= 0 ? manifest.anchors[nextIndex] : undefined
 
     if (nextAnchor && state.stages[nextIndex]) {
+        // 跳转（非 +1）时累加目标的 jumpCount 供环检测
+        if (anchor.onPass && nextIndex !== state.currentAnchorIndex + 1) {
+            state.stages[nextIndex].jumpCount = (state.stages[nextIndex].jumpCount ?? 0) + 1
+        }
         state.currentAnchorIndex = nextIndex
         state.currentStage = nextAnchor.id
         state.stages[nextIndex].status = 'in_progress'
@@ -552,6 +820,21 @@ function handleSuccess(
 
     writeState(cwd, state, manifest.stateFile)
 
+    // ★ 通用钩子层：上下文存档（防信息衰减）+ afterAnchor 钩子
+    const archive = buildContextArchive(anchor, verifyResult)
+    saveContextArchive(cwd, archive)
+    if (anchorHooks?.afterAnchor) {
+        try {
+            const hookCtx = buildHookContext(anchor, state, cwd)
+            await anchorHooks.afterAnchor(hookCtx, verifyResult, archive)
+        } catch {
+            // 钩子失败不阻断流程
+        }
+    }
+
+    // ★ 统一事件流：节点完成 / 流程完成 / 推进到下一节点
+    emitStageCompleteEvents(anchor, stageRecord, nextAnchor, now, anchorHooks)
+
     logStageEvent(
         cwd,
         manifest,
@@ -559,11 +842,20 @@ function handleSuccess(
         anchor.id,
         'advance',
         verifyResult,
-        nextAnchor ? `推进到: ${nextAnchor.id}` : '任务完成'
+        buildAdvanceMessage(anchor, nextAnchor)
     )
 
     if (nextAnchor) {
-        return buildInstruction(manifest, nextAnchor, state, true, undefined)
+        return buildInstruction(
+            manifest,
+            nextAnchor,
+            state,
+            true,
+            undefined,
+            cwd,
+            memoryHooks,
+            anchorHooks
+        )
     }
 
     // 全部完成 → 清理 workspace（保留 artifacts 供审计）
@@ -617,10 +909,12 @@ function logStageEvent(
  * 查询当前指令（不推进，不验证）
  * 用于断线恢复：告诉 LLM "你在哪一步，该做什么"
  */
-export function getCurrentInstruction(
+export async function getCurrentInstruction(
     manifest: AnchorManifest,
-    cwd: string = manifest.cwd || process.cwd()
-): AnchorInstruction {
+    cwd: string = manifest.cwd || process.cwd(),
+    memoryHooks?: MemoryHooks,
+    anchorHooks?: AnchorHooks
+): Promise<AnchorInstruction> {
     const state = readState(cwd, manifest.stateFile)
 
     if (!state) {
@@ -637,18 +931,80 @@ export function getCurrentInstruction(
     }
 
     const currentAnchor = manifest.anchors[state.currentAnchorIndex]
-    return buildInstruction(manifest, currentAnchor, state, false, undefined)
+    return buildInstruction(
+        manifest,
+        currentAnchor,
+        state,
+        false,
+        undefined,
+        cwd,
+        memoryHooks,
+        anchorHooks
+    )
 }
 
 /**
- * 构建给 LLM 的指令对象
+ * 构建给 LLM 的指令对象（async：可读入决策记忆内联）
  */
-function buildInstruction(
+async function buildInstruction(
     manifest: AnchorManifest,
     anchor: AnchorDefinition,
     state: AnchorState,
     advanced: boolean,
-    verifyResult?: VerifyResult
+    verifyResult: VerifyResult | undefined,
+    cwd: string = manifest.cwd || process.cwd(),
+    memoryHooks?: MemoryHooks,
+    anchorHooks?: AnchorHooks
+): Promise<AnchorInstruction> {
+    // ★ 通用钩子层：beforeAnchor 注入上下文（影响分析/知识库/figma等）
+    const contextInline = await runBeforeAnchor(anchor, state, cwd, anchorHooks)
+    // ★ 通用钩子层：readsContext 读入上游上下文存档（防信息衰减）
+    const contextArchiveInline = inlineContextArchive(anchor, cwd)
+
+    const inst = buildInstructionSync(
+        manifest,
+        anchor,
+        state,
+        advanced,
+        verifyResult,
+        contextInline,
+        contextArchiveInline
+    )
+
+    // ★ 补丁A：读入决策记忆内联（readsMemory → memoryInline）
+    if (anchor.readsMemory && anchor.readsMemory.length > 0) {
+        const mem = await readMemory(anchor.readsMemory, cwd, manifest.memory, memoryHooks)
+        if (mem.length > 0) inst.memoryInline = mem
+    }
+
+    return inst
+}
+
+/** 非空数组返回自身，空数组/undefined 返回 undefined */
+function orUndefined<T>(arr: T[] | undefined): T[] | undefined {
+    return arr && arr.length > 0 ? arr : undefined
+}
+
+/** 构建委派子 skill 的 brief 提示 */
+function buildBrief(anchor: AnchorDefinition): string | undefined {
+    return anchor.delegateSkill
+        ? `【本阶段委派子 skill：use_skill ${anchor.delegateSkill}】\n引擎不信"说调了"，将通过下方 verify 校验该 skill 的确定性产物证明其真跑。\n\n${anchor.brief ?? ''}`
+        : anchor.brief
+}
+
+/**
+ * 同步组装指令核心（不含 async 的 memory 读入）
+ *
+ * 抽出供 tryEscalateJump 等同步路径复用；memory 内联由 async 版 buildInstruction 追加。
+ */
+function buildInstructionSync(
+    manifest: AnchorManifest,
+    anchor: AnchorDefinition,
+    state: AnchorState,
+    advanced: boolean,
+    verifyResult?: VerifyResult,
+    contextInline?: ContextItem[],
+    contextArchiveInline?: ContextArchive[]
 ): AnchorInstruction {
     const baseCwd = manifest.cwd || process.cwd()
 
@@ -660,12 +1016,16 @@ function buildInstruction(
     const attempts = stageRecord?.attempts ?? 0
     const nextAction = buildNextAction(anchor, advanced, verifyResult, attempts, maxAttempts)
 
+    const brief = buildBrief(anchor)
+
     return {
         stage: anchor.id,
         stageName: anchor.name,
-        brief: anchor.brief,
-        rulesInline: rulesInline.length > 0 ? rulesInline : undefined,
-        artifactsInline: artifactsInline.length > 0 ? artifactsInline : undefined,
+        brief,
+        rulesInline: orUndefined(rulesInline),
+        artifactsInline: orUndefined(artifactsInline),
+        contextInline: orUndefined(contextInline),
+        contextArchiveInline: orUndefined(contextArchiveInline),
         produces: anchor.produces,
         emits: anchor.emits,
         allowedTools: anchor.allowedTools,
@@ -739,6 +1099,143 @@ function resolveArtifactContent(art: Artifact, baseCwd: string): string {
         return existsSync(fp) ? safeRead(fp) : `⚠️ artifact 文件不存在: ${art.path}`
     }
     return safeStringify(art.value)
+}
+
+// ==================== 通用钩子层（上下文存档 + 生命周期钩子） ====================
+
+const DEFAULT_ARCHIVE_FILE = join('.specflow', 'context', 'archive.jsonl')
+
+/** 构建上下文存档（anchor 完成时自动构建） */
+function buildContextArchive(anchor: AnchorDefinition, verifyResult: VerifyResult): ContextArchive {
+    return {
+        anchorId: anchor.id,
+        anchorName: anchor.name,
+        consumed: anchor.consumes || [],
+        emitted: anchor.emits || [],
+        produced: anchor.produces || [],
+        verifyChecks: verifyResult.checks,
+        completedAt: new Date().toISOString()
+    }
+}
+
+/** 存档上下文到本地 JSONL（防信息衰减的确定性事实源） */
+function saveContextArchive(cwd: string, archive: ContextArchive): void {
+    const path = join(cwd, DEFAULT_ARCHIVE_FILE)
+    mkdirSync(dirname(path), { recursive: true })
+    appendFileSync(path, JSON.stringify(archive) + '\n', 'utf-8')
+}
+
+/** 读取上游 anchor 的上下文存档（readsContext → contextArchiveInline） */
+function readContextArchives(anchorIds: string[], cwd: string): ContextArchive[] {
+    if (!anchorIds || anchorIds.length === 0) return []
+    const path = join(cwd, DEFAULT_ARCHIVE_FILE)
+    if (!existsSync(path)) return []
+
+    const result: ContextArchive[] = []
+    const lines = readFileSync(path, 'utf-8')
+        .split('\n')
+        .filter((l) => l.trim())
+    for (const line of lines) {
+        try {
+            const archive = JSON.parse(line) as ContextArchive
+            if (anchorIds.includes(archive.anchorId)) {
+                result.push(archive)
+            }
+        } catch {
+            // skip malformed lines
+        }
+    }
+    return result
+}
+
+/** 内联上游上下文存档（readsContext → contextArchiveInline） */
+function inlineContextArchive(anchor: AnchorDefinition, cwd: string): ContextArchive[] | undefined {
+    if (!anchor.readsContext || anchor.readsContext.length === 0) return undefined
+    return readContextArchives(anchor.readsContext, cwd)
+}
+
+/** 构建钩子上下文（传给 beforeAnchor/afterAnchor 的运行时信息） */
+function buildHookContext(anchor: AnchorDefinition, state: AnchorState, cwd: string): HookContext {
+    const artifacts: Record<string, Artifact> = {}
+    if (anchor.consumes) {
+        for (const key of anchor.consumes) {
+            if (state.artifacts[key]) {
+                artifacts[key] = state.artifacts[key]
+            }
+        }
+    }
+    return {
+        anchorId: anchor.id,
+        anchorName: anchor.name,
+        cwd,
+        state,
+        artifacts,
+        anchor
+    }
+}
+
+/** 调用 beforeAnchor 钩子（注入上下文，如影响分析/知识库/figma） */
+async function runBeforeAnchor(
+    anchor: AnchorDefinition,
+    state: AnchorState,
+    cwd: string,
+    anchorHooks?: AnchorHooks
+): Promise<ContextItem[] | undefined> {
+    if (!anchorHooks?.beforeAnchor) return undefined
+    try {
+        const ctx = buildHookContext(anchor, state, cwd)
+        return await anchorHooks.beforeAnchor(ctx)
+    } catch {
+        return undefined
+    }
+}
+
+/**
+ * ★ 触发统一事件流（fire-and-forget，通知不阻断流程）
+ *
+ * 引擎在状态转换关键节点触发事件，外部通过 onEvent 钩子接收。
+ * 采用 fire-and-forget：通知失败（钩子抛错/未注入）静默吞掉，
+ * 绝不因通知问题中断主流程。
+ */
+function emitEvent(anchorHooks: AnchorHooks | undefined, event: AnchorEvent): void {
+    if (!anchorHooks?.onEvent) return
+    Promise.resolve(anchorHooks.onEvent(event)).catch(() => {
+        // 通知失败不阻断主流程
+    })
+}
+
+/** 节点完成/流程完成/推进到下一节点的事件上报（拆出以降低 handleSuccess 复杂度） */
+function emitStageCompleteEvents(
+    anchor: AnchorDefinition,
+    stageRecord: StageRecord,
+    nextAnchor: AnchorDefinition | undefined,
+    now: string,
+    anchorHooks?: AnchorHooks
+): void {
+    if (nextAnchor) {
+        emitEvent(anchorHooks, {
+            type: 'stage_complete',
+            stageId: anchor.id,
+            stageName: anchor.name,
+            timestamp: now,
+            attempts: stageRecord.attempts,
+            nextStage: nextAnchor.id
+        })
+        emitEvent(anchorHooks, {
+            type: 'stage_start',
+            stageId: nextAnchor.id,
+            stageName: nextAnchor.name,
+            timestamp: now
+        })
+    } else {
+        emitEvent(anchorHooks, {
+            type: 'done',
+            stageId: anchor.id,
+            stageName: anchor.name,
+            timestamp: now,
+            attempts: stageRecord.attempts
+        })
+    }
 }
 
 /** 构建 nextAction 文本 */

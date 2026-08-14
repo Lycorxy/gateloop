@@ -73,10 +73,11 @@ export function metricArchitecture(input: ArchInput): MetricResult {
 
     metrics.srcVerified = hasSrc
 
-    const warnCount = facts.filter(f => f.severity === 'warn').length
-    const summary = warnCount === 0
-        ? `architecture: ${moduleBoundary.length} 模块，无架构风险信号`
-        : `architecture: ${moduleBoundary.length} 模块，${warnCount} 项架构风险信号（度量回灌，模型自评）`
+    const warnCount = facts.filter((f) => f.severity === 'warn').length
+    const summary =
+        warnCount === 0
+            ? `architecture: ${moduleBoundary.length} 模块，无架构风险信号`
+            : `architecture: ${moduleBoundary.length} 模块，${warnCount} 项架构风险信号（度量回灌，模型自评）`
 
     return {
         passed: true,
@@ -122,26 +123,33 @@ function checkModuleStructure(moduleBoundary: JsonData[]): MetricFact[] {
 
     const deviatingModules: string[] = []
     for (const [dir, types] of moduleFileTypes) {
-        const missing = standardTypes.filter(t => !types.has(t))
+        const missing = standardTypes.filter((t) => !types.has(t))
         if (missing.length > 0) {
             deviatingModules.push(`${dir}（缺 ${missing.join('/')}）`)
         }
     }
 
     if (deviatingModules.length > 0) {
-        return [{
-            fact: `模块同构性: ${moduleCount - deviatingModules.length}/${moduleCount} 模块遵循 [${standardTypes.join('+')}] 标准结构，偏离: ${deviatingModules.slice(0, 3).join(', ')}${deviatingModules.length > 3 ? '...' : ''}`,
-            severity: 'warn'
-        }]
+        return [
+            {
+                fact: `模块同构性: ${moduleCount - deviatingModules.length}/${moduleCount} 模块遵循 [${standardTypes.join('+')}] 标准结构，偏离: ${deviatingModules.slice(0, 3).join(', ')}${deviatingModules.length > 3 ? '...' : ''}`,
+                severity: 'warn'
+            }
+        ]
     }
-    return [{
-        fact: `模块同构性: 全部 ${moduleCount} 模块遵循 [${standardTypes.join('+')}] 标准结构`,
-        severity: 'info'
-    }]
+    return [
+        {
+            fact: `模块同构性: 全部 ${moduleCount} 模块遵循 [${standardTypes.join('+')}] 标准结构`,
+            severity: 'info'
+        }
+    ]
 }
 
 /** A2. 模块规模均衡 — 数函数数算方差，找过载模块 */
-function checkModuleScaleBalance(moduleBoundary: JsonData[], functionOwnership: JsonData[]): MetricFact[] {
+function checkModuleScaleBalance(
+    moduleBoundary: JsonData[],
+    functionOwnership: JsonData[]
+): MetricFact[] {
     const moduleFns: Record<string, number> = {}
     for (const mod of moduleBoundary) {
         const moduleName = String(mod.responsibility || mod.file || 'unknown')
@@ -173,28 +181,40 @@ function checkModuleScaleBalance(moduleBoundary: JsonData[], functionOwnership: 
         .map(([name, count]) => `${name}: ${count} 函数`)
 
     if (overloaded.length > 0) {
-        return [{
-            fact: `模块规模不均: 最小 ${min} / 最大 ${max} / 平均 ${avg.toFixed(1)}，过载模块: ${overloaded.join(', ')}（>平均2倍且≥8，疑似职责过多）`,
-            severity: 'warn'
-        }]
+        return [
+            {
+                fact: `模块规模不均: 最小 ${min} / 最大 ${max} / 平均 ${avg.toFixed(1)}，过载模块: ${overloaded.join(', ')}（>平均2倍且≥8，疑似职责过多）`,
+                severity: 'warn'
+            }
+        ]
     }
-    return [{
-        fact: `模块规模分布: 最小 ${min} / 最大 ${max} / 平均 ${avg.toFixed(1)}`,
-        severity: 'info'
-    }]
+    return [
+        {
+            fact: `模块规模分布: 最小 ${min} / 最大 ${max} / 平均 ${avg.toFixed(1)}`,
+            severity: 'info'
+        }
+    ]
 }
 
 /** A3. 模块边界对齐 — moduleBoundary 声明 vs functionOwnership 实际对比 */
-function checkBoundaryOwnershipAlignment(moduleBoundary: JsonData[], functionOwnership: JsonData[]): MetricFact[] {
+function checkBoundaryOwnershipAlignment(
+    moduleBoundary: JsonData[],
+    functionOwnership: JsonData[]
+): MetricFact[] {
     const facts: MetricFact[] = []
 
-    const declaredFiles = new Set(moduleBoundary.map(m => String(m.file || '')).filter(Boolean))
-    const actualFiles = new Set(functionOwnership.map(f => String(f.file || '')).filter(Boolean))
+    const declaredFiles = new Set(moduleBoundary.map((m) => String(m.file || '')).filter(Boolean))
+    const actualFiles = new Set(functionOwnership.map((f) => String(f.file || '')).filter(Boolean))
 
-    const emptyModules = moduleBoundary.filter(m => {
-        const file = String(m.file || '')
-        return !functionOwnership.some(f => String(f.file || '') === file || String(f.file || '').startsWith(dirname(file)))
-    }).map(m => String(m.file || m.responsibility || 'unknown'))
+    const emptyModules = moduleBoundary
+        .filter((m) => {
+            const file = String(m.file || '')
+            return !functionOwnership.some(
+                (f) =>
+                    String(f.file || '') === file || String(f.file || '').startsWith(dirname(file))
+            )
+        })
+        .map((m) => String(m.file || m.responsibility || 'unknown'))
 
     if (emptyModules.length > 0) {
         facts.push({
@@ -203,8 +223,8 @@ function checkBoundaryOwnershipAlignment(moduleBoundary: JsonData[], functionOwn
         })
     }
 
-    const undeclaredFiles = [...actualFiles].filter(f => {
-        return !moduleBoundary.some(m => {
+    const undeclaredFiles = [...actualFiles].filter((f) => {
+        return !moduleBoundary.some((m) => {
             const modDir = dirname(String(m.file || ''))
             return f === String(m.file || '') || f.startsWith(modDir)
         })
@@ -230,7 +250,10 @@ function checkBoundaryOwnershipAlignment(moduleBoundary: JsonData[], functionOwn
 // ==================== B. 耦合性 ====================
 
 /** B1. 跨模块共享函数 — 一个文件被多个模块引用 */
-function checkCrossModuleSharing(moduleBoundary: JsonData[], functionOwnership: JsonData[]): MetricFact[] {
+function checkCrossModuleSharing(
+    moduleBoundary: JsonData[],
+    functionOwnership: JsonData[]
+): MetricFact[] {
     const fileModules: Record<string, Set<string>> = {}
     for (const fn of functionOwnership) {
         const file = String(fn.file || '')
@@ -250,10 +273,12 @@ function checkCrossModuleSharing(moduleBoundary: JsonData[], functionOwnership: 
         .map(([file, modules]) => `${file}（${modules.size} 模块共享）`)
 
     if (sharedFiles.length > 0) {
-        return [{
-            fact: `跨模块共享文件（≥3 模块引用）: ${sharedFiles.join(', ')}——可能是公共工具或耦合点`,
-            severity: 'warn'
-        }]
+        return [
+            {
+                fact: `跨模块共享文件（≥3 模块引用）: ${sharedFiles.join(', ')}——可能是公共工具或耦合点`,
+                severity: 'warn'
+            }
+        ]
     }
     return []
 }
@@ -272,7 +297,11 @@ function checkImportDirection(dir: string): MetricFact[] {
         { name: 'app', segments: ['app'] }
     ]
 
-    const tsFiles = glob.sync(join(dir, '**/*.{ts,tsx}').replace(/\\/g, '/'), { cwd, absolute: true, ignore: ['**/node_modules/**', '**/dist/**'] })
+    const tsFiles = glob.sync(join(dir, '**/*.{ts,tsx}').replace(/\\/g, '/'), {
+        cwd,
+        absolute: true,
+        ignore: ['**/node_modules/**', '**/dist/**']
+    })
 
     function findLayerIndex(pathStr: string): number {
         const normalized = pathStr.replace(/\\/g, '/')
@@ -296,21 +325,27 @@ function checkImportDirection(dir: string): MetricFact[] {
             const targetLayerIdx = findLayerIndex(imp)
             if (targetLayerIdx === -1) continue
             if (targetLayerIdx > currentLayerIdx) {
-                violations.push(`${layers[currentLayerIdx].name} → ${layers[targetLayerIdx].name}: ${relFile} import ${imp}`)
+                violations.push(
+                    `${layers[currentLayerIdx].name} → ${layers[targetLayerIdx].name}: ${relFile} import ${imp}`
+                )
             }
         }
     }
 
     if (violations.length > 0) {
-        return [{
-            fact: `反向依赖（${violations.length} 处）: ${violations.slice(0, 3).join('; ')}${violations.length > 3 ? '...' : ''}`,
-            severity: 'warn'
-        }]
+        return [
+            {
+                fact: `反向依赖（${violations.length} 处）: ${violations.slice(0, 3).join('; ')}${violations.length > 3 ? '...' : ''}`,
+                severity: 'warn'
+            }
+        ]
     }
-    return [{
-        fact: '依赖方向: 全部正向（utils → hooks → components → pages）',
-        severity: 'info'
-    }]
+    return [
+        {
+            fact: '依赖方向: 全部正向（utils → hooks → components → pages）',
+            severity: 'info'
+        }
+    ]
 }
 
 /** B3. God module — 扇入扇出双高 */
@@ -318,7 +353,11 @@ function checkFanInOut(dir: string): MetricFact[] {
     const facts: MetricFact[] = []
     const cwd = process.cwd()
 
-    const tsFiles = glob.sync(join(dir, '**/*.{ts,tsx}').replace(/\\/g, '/'), { cwd, absolute: true, ignore: ['**/node_modules/**', '**/dist/**'] })
+    const tsFiles = glob.sync(join(dir, '**/*.{ts,tsx}').replace(/\\/g, '/'), {
+        cwd,
+        absolute: true,
+        ignore: ['**/node_modules/**', '**/dist/**']
+    })
 
     const moduleImports: Record<string, Set<string>> = {}
     const moduleImportedBy: Record<string, Set<string>> = {}
@@ -346,8 +385,8 @@ function checkFanInOut(dir: string): MetricFact[] {
     }
 
     const godModules = Object.keys(moduleImports)
-        .filter(m => (moduleImports[m]?.size || 0) >= 3 && (moduleImportedBy[m]?.size || 0) >= 3)
-        .map(m => `${m}（扇出 ${moduleImports[m].size} / 扇入 ${moduleImportedBy[m].size}）`)
+        .filter((m) => (moduleImports[m]?.size || 0) >= 3 && (moduleImportedBy[m]?.size || 0) >= 3)
+        .map((m) => `${m}（扇出 ${moduleImports[m].size} / 扇入 ${moduleImportedBy[m].size}）`)
 
     if (godModules.length > 0) {
         facts.push({
@@ -374,7 +413,11 @@ function checkStoreFields(dir: string): MetricFact[] {
     const facts: MetricFact[] = []
     const cwd = process.cwd()
 
-    const tsFiles = glob.sync(join(dir, '**/*.{ts,tsx}').replace(/\\/g, '/'), { cwd, absolute: true, ignore: ['**/node_modules/**', '**/dist/**'] })
+    const tsFiles = glob.sync(join(dir, '**/*.{ts,tsx}').replace(/\\/g, '/'), {
+        cwd,
+        absolute: true,
+        ignore: ['**/node_modules/**', '**/dist/**']
+    })
 
     for (const file of tsFiles) {
         const content = safeRead(file)

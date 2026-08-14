@@ -1,8 +1,8 @@
-# 完整 Skill 示例：code-review-check v3（ADS Harness 模式）
+# 完整 Skill 示例：code-review-check v3（GateLoop Harness 模式）
 
-一个展示 v3 最佳实践（ADS harness + RULE.mdc 内联 + 任务式流程 + floor-ceiling 分工）的生产级 skill。
+一个展示 v3 最佳实践（GateLoop harness + RULE.mdc 内联 + 任务式流程 + floor-ceiling 分工）的生产级 skill。
 
-> v3 关键变更：不再依赖 specflow-rules-engine。规则注入由 ADS harness `reads` + `rulesInline` 自动完成（或独立 skill 时由 `RULE.mdc` `alwaysApply: true` 直接注入 System Prompt）。
+> v3 关键变更：不再依赖 specflow-rules-engine。规则注入由 GateLoop harness `reads` + `rulesInline` 自动完成（或独立 skill 时由 `RULE.mdc` `alwaysApply: true` 直接注入 System Prompt）。
 
 ## 文件：RULE.mdc
 

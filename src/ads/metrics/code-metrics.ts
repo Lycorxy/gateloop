@@ -32,7 +32,11 @@ export function metricCode(input: CodeInput): MetricResult {
 
     // 1. 扫描所有 TS/TSX 文件
     const tsPattern = join(targetDir, '**/*.{ts,tsx}').replace(/\\/g, '/')
-    const files = glob.sync(tsPattern, { cwd, absolute: true, ignore: ['**/node_modules/**', '**/dist/**'] })
+    const files = glob.sync(tsPattern, {
+        cwd,
+        absolute: true,
+        ignore: ['**/node_modules/**', '**/dist/**']
+    })
 
     if (files.length === 0) {
         return {
@@ -151,7 +155,9 @@ function buildImportGraph(files: FileInfo[]): Map<string, string[]> {
     const graph = new Map<string, string[]>()
     for (const f of files) {
         const key = f.path.replace(/\.(ts|tsx|js|jsx)$/, '')
-        const normalizedImports = f.imports.map(imp => imp.replace(/\.(ts|tsx|js|jsx|scss|css)$/, ''))
+        const normalizedImports = f.imports.map((imp) =>
+            imp.replace(/\.(ts|tsx|js|jsx|scss|css)$/, '')
+        )
         graph.set(key, normalizedImports)
     }
     return graph

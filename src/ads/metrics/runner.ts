@@ -43,10 +43,7 @@ export async function runMetric(args: string[]): Promise<void> {
     }
 }
 
-async function dispatch(
-    type: string,
-    flags: Record<string, string>
-): Promise<MetricResult> {
+async function dispatch(type: string, flags: Record<string, string>): Promise<MetricResult> {
     switch (type) {
         case 'design':
             return metricDesign({
@@ -66,7 +63,9 @@ async function dispatch(
                 dir: flags.dir || 'src'
             })
         default:
-            throw new Error(`未知度量类型: ${type}（可用: design / architecture / code / style-crosscheck）`)
+            throw new Error(
+                `未知度量类型: ${type}（可用: design / architecture / code / style-crosscheck）`
+            )
     }
 }
 
@@ -85,6 +84,13 @@ function parseFlags(args: string[]): Record<string, string> {
     return flags
 }
 
+/** 严重程度对应的图标 */
+function severityIcon(severity: string): string {
+    if (severity === 'fail') return '❌'
+    if (severity === 'warn') return '⚠️'
+    return '•'
+}
+
 /** 统一输出：一行 JSON 到 stdout，便于引擎解析；人类可读摘要附后 */
 function output(result: MetricResult): void {
     console.log(JSON.stringify(result))
@@ -92,8 +98,7 @@ function output(result: MetricResult): void {
     if (result.facts.length > 0) {
         console.log('\n度量事实:')
         for (const f of result.facts) {
-            const icon = f.severity === 'fail' ? '❌' : f.severity === 'warn' ? '⚠️' : '•'
-            console.log(`  ${icon} ${f.fact}`)
+            console.log(`  ${severityIcon(f.severity)} ${f.fact}`)
         }
     }
 }

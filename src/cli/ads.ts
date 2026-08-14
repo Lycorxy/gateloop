@@ -23,6 +23,7 @@
  */
 
 import { loadManifest, Ads } from '../ads'
+import type { AnchorInstruction } from '../ads'
 import { runMetric, printMetricHelp } from '../ads/metrics'
 
 export async function runAds(args: string[]): Promise<void> {
@@ -53,7 +54,7 @@ export async function runAds(args: string[]): Promise<void> {
         if (arg.startsWith('--')) {
             const key = arg.slice(2)
             const next = args[i + 1]
-            const value = (!next || next.startsWith('--')) ? 'true' : next
+            const value = !next || next.startsWith('--') ? 'true' : next
             flags[key] = value
             if (value !== 'true') i++
         }
@@ -92,18 +93,28 @@ export async function runAds(args: string[]): Promise<void> {
             }
 
             case 'status': {
-                printInstruction(ads.status())
+                printInstruction(await ads.status())
                 break
             }
 
             case 'check': {
                 const result = await ads.check()
-                console.log(JSON.stringify({
-                    passed: result.passed,
-                    errors: result.errors,
-                    checks: result.checks.map(c => ({ name: c.name, passed: c.passed, output: c.output })),
-                    duration: result.duration
-                }, null, 2))
+                console.log(
+                    JSON.stringify(
+                        {
+                            passed: result.passed,
+                            errors: result.errors,
+                            checks: result.checks.map((c) => ({
+                                name: c.name,
+                                passed: c.passed,
+                                output: c.output
+                            })),
+                            duration: result.duration
+                        },
+                        null,
+                        2
+                    )
+                )
                 if (!result.passed) process.exit(1)
                 break
             }
@@ -111,7 +122,7 @@ export async function runAds(args: string[]): Promise<void> {
             case 'retry': {
                 ads.retry()
                 console.log('🔄 已开始新一轮尝试（producesFresh 基准已刷新）')
-                printInstruction(ads.status())
+                printInstruction(await ads.status())
                 break
             }
 
@@ -123,7 +134,9 @@ export async function runAds(args: string[]): Promise<void> {
 
             case 'gc': {
                 const recycled = ads.gc()
-                console.log(`🧹 GC 完成，回收 ${recycled.length} 个残留 scratch 目录${recycled.length ? ': ' + recycled.join(', ') : ''}`)
+                console.log(
+                    `🧹 GC 完成，回收 ${recycled.length} 个残留 scratch 目录${recycled.length ? ': ' + recycled.join(', ') : ''}`
+                )
                 break
             }
 
@@ -132,7 +145,12 @@ export async function runAds(args: string[]): Promise<void> {
                     console.error('请提供 --desc 参数')
                     process.exit(1)
                 }
-                const produces = flags.produces ? flags.produces.split(',').map(s => s.trim()).filter(Boolean) : undefined
+                const produces = flags.produces
+                    ? flags.produces
+                          .split(',')
+                          .map((s) => s.trim())
+                          .filter(Boolean)
+                    : undefined
                 const subtasks = ads.addSubtasks([{ id: flags.id, desc: flags.desc, produces }])
                 console.log(JSON.stringify(subtasks, null, 2))
                 break
@@ -164,6 +182,30 @@ export async function runAds(args: string[]): Promise<void> {
                 break
             }
 
+            case 'mem-write': {
+                if (!flags.key) {
+                    console.error('请提供 --key 参数')
+                    process.exit(1)
+                }
+                await ads.memWrite(flags.key, parseValue(flags.value))
+                console.log(`🧠 已回写决策记忆: ${flags.key}`)
+                break
+            }
+
+            case 'mem-read': {
+                if (!flags.key) {
+                    console.error('请提供 --key 参数（多个用逗号分隔）')
+                    process.exit(1)
+                }
+                const keys = flags.key
+                    .split(',')
+                    .map((s) => s.trim())
+                    .filter(Boolean)
+                const mem = await ads.memRead(keys)
+                console.log(JSON.stringify(mem, null, 2))
+                break
+            }
+
             default:
                 console.error(`未知命令: ${command}`)
                 printHelp()
@@ -187,7 +229,7 @@ function parseValue(raw?: string): unknown {
 
 // ==================== 输出格式化 ====================
 
-function printInstruction(instruction: ReturnType<typeof Ads.prototype.status>) {
+function printInstruction(instruction: AnchorInstruction) {
     console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
     if (instruction.done) {
         console.log('✅ 所有阶段已完成')
@@ -195,7 +237,9 @@ function printInstruction(instruction: ReturnType<typeof Ads.prototype.status>) 
         return
     }
 
-    console.log(`📌 阶段: ${instruction.stage}${instruction.stageName ? ` (${instruction.stageName})` : ''}`)
+    console.log(
+        `📌 阶段: ${instruction.stage}${instruction.stageName ? ` (${instruction.stageName})` : ''}`
+    )
     if (typeof instruction.attempts === 'number' && instruction.maxAttempts) {
         console.log(`🔁 尝试: ${instruction.attempts}/${instruction.maxAttempts}`)
     }
@@ -224,9 +268,34 @@ function printInstruction(instruction: ReturnType<typeof Ads.prototype.status>) 
         }
     }
 
+    if (instruction.memoryInline && instruction.memoryInline.length > 0) {
+        console.log(`\n🧠 决策记忆 (${instruction.memoryInline.length} 条已内联):`)
+        for (const mem of instruction.memoryInline) {
+            console.log(`  ─ ${mem.key}: ${mem.content.slice(0, 120)}`)
+        }
+    }
+
+    if (instruction.contextInline && instruction.contextInline.length > 0) {
+        console.log(`\n🔗 钩子上下文 (${instruction.contextInline.length} 条已注入):`)
+        for (const ctx of instruction.contextInline) {
+            console.log(`  ─ [${ctx.source}] ${ctx.content.slice(0, 120)}`)
+        }
+    }
+
+    if (instruction.contextArchiveInline && instruction.contextArchiveInline.length > 0) {
+        console.log(`\n📋 上游上下文存档 (${instruction.contextArchiveInline.length} 个 anchor):`)
+        for (const arc of instruction.contextArchiveInline) {
+            console.log(
+                `  ─ ${arc.anchorId}: 消费${arc.consumed.length}/产出${arc.emitted.length}/验证${arc.verifyChecks.length}项`
+            )
+        }
+    }
+
     if (instruction.requiresSubtasks) {
         const subs = instruction.subtasks || []
-        console.log(`\n🧩 子任务 (${subs.filter(s => s.status === 'done').length}/${subs.length} 完成):`)
+        console.log(
+            `\n🧩 子任务 (${subs.filter((s) => s.status === 'done').length}/${subs.length} 完成):`
+        )
         if (subs.length === 0) {
             console.log('  ⚠️ 本阶段要求先拆分子任务：nut ads subtask-add ... --desc "..."')
         }
@@ -264,9 +333,13 @@ function printInstruction(instruction: ReturnType<typeof Ads.prototype.status>) 
 
     if (instruction.verifyResult) {
         const vr = instruction.verifyResult
-        console.log(`\n${vr.passed ? '✅' : '❌'} 验证结果: ${vr.passed ? '通过' : '失败'} (${vr.checks.length} 项检查)`)
+        console.log(
+            `\n${vr.passed ? '✅' : '❌'} 验证结果: ${vr.passed ? '通过' : '失败'} (${vr.checks.length} 项检查)`
+        )
         for (const check of vr.checks) {
-            console.log(`  ${check.passed ? '✅' : '❌'} ${check.name}${check.duration ? ` (${check.duration}ms)` : ''}`)
+            console.log(
+                `  ${check.passed ? '✅' : '❌'} ${check.name}${check.duration ? ` (${check.duration}ms)` : ''}`
+            )
             if (!check.passed && check.output) {
                 console.log(`     ${check.output.slice(0, 200)}`)
             }
@@ -301,6 +374,8 @@ function printHelp() {
   subtask-add   拆分子任务        nut ads subtask-add <manifest> --desc "..." [--id x] [--produces "a,b"]
   subtask-done  完成子任务        nut ads subtask-done <manifest> --id <subtaskId>
   emit          产出 artifact    nut ads emit <manifest> --key k --kind file|value [--path p] [--value v]
+  mem-write     回写决策记忆      nut ads mem-write <manifest> --key k [--value v]
+  mem-read      读取决策记忆      nut ads mem-read <manifest> --key "k1,k2"
   metric        客观度量          nut ads metric <type> [--dir src] [--input plan.json]
 
 manifest:

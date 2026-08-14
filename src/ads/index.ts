@@ -26,7 +26,8 @@ import type {
     AnchorState,
     SubTask,
     Artifact,
-    LogEntry
+    LogEntry,
+    AnchorHooks
 } from './types'
 import {
     initTask,
@@ -38,9 +39,11 @@ import {
     addSubtasks,
     completeSubtask,
     emitArtifact,
+    writeMemoryEntry,
     retryStage
 } from './state'
 import { verify } from './verify'
+import { readMemory, type MemoryHooks } from './memory'
 import { tmpFile, tmpDir, gcScratch, getWorkspaceDir, getArtifactsDir } from './workspace'
 
 // ==================== Manifest 加载 ====================
@@ -82,10 +85,16 @@ export function loadManifest(path: string): AnchorManifest {
 export class Ads {
     private manifest: AnchorManifest
     private cwd: string
+    /** ★ 补丁A：记忆读写钩子（接真实 MCP；未注入时降级本地 store） */
+    private memoryHooks?: MemoryHooks
+    /** ★ 通用钩子层：生命周期钩子（beforeAnchor/afterAnchor，接外部系统） */
+    private anchorHooks?: AnchorHooks
 
-    constructor(manifest: AnchorManifest) {
+    constructor(manifest: AnchorManifest, memoryHooks?: MemoryHooks, anchorHooks?: AnchorHooks) {
         this.manifest = manifest
         this.cwd = manifest.cwd || process.cwd()
+        this.memoryHooks = memoryHooks
+        this.anchorHooks = anchorHooks
     }
 
     /**
@@ -104,7 +113,7 @@ export class Ads {
             resetTask(this.manifest, this.cwd)
         }
 
-        initTask(this.manifest, task, this.cwd)
+        initTask(this.manifest, task, this.cwd, this.anchorHooks)
         return this.status()
     }
 
@@ -119,7 +128,9 @@ export class Ads {
             this.manifest,
             (anchor: AnchorDefinition, cwd: string, state, hooks) =>
                 verify(anchor, cwd, state, hooks),
-            this.cwd
+            this.cwd,
+            this.memoryHooks,
+            this.anchorHooks
         )
     }
 
@@ -127,8 +138,8 @@ export class Ads {
      * 查询当前指令（不推进、不验证）
      * 用于断线恢复：告诉 LLM "你在哪一步，该做什么"。
      */
-    status(): AnchorInstruction {
-        return getCurrentInstruction(this.manifest, this.cwd)
+    status(): Promise<AnchorInstruction> {
+        return getCurrentInstruction(this.manifest, this.cwd, this.memoryHooks, this.anchorHooks)
     }
 
     /**
@@ -203,6 +214,24 @@ export class Ads {
     getArtifact(key: string): Artifact | undefined {
         const state = readState(this.cwd, this.manifest.stateFile)
         return state?.artifacts[key]
+    }
+
+    // ==================== Memory（跨任务决策记忆） ====================
+
+    /**
+     * ★ 补丁A：回写一条决策记忆（writesMemory 门禁以此为准）
+     *
+     * 落本地 store + MCP（若注入 hooks）。供 anchor 在完成前沉淀本轮结论。
+     */
+    async memWrite(key: string, value: unknown): Promise<void> {
+        return writeMemoryEntry(this.manifest, key, value, this.cwd, this.memoryHooks)
+    }
+
+    /**
+     * ★ 补丁A：读取一批决策记忆（只读，返回 key→内容）
+     */
+    async memRead(keys: string[]): Promise<Array<{ key: string; content: string }>> {
+        return readMemory(keys, this.cwd, this.manifest.memory, this.memoryHooks)
     }
 
     // ==================== 临时工作区 ====================
@@ -295,8 +324,10 @@ export {
     addSubtasks,
     completeSubtask,
     emitArtifact,
+    writeMemoryEntry,
     retryStage
 } from './state'
+export { readMemory, writeMemory, checkMemoryWritten, type MemoryHooks } from './memory'
 
 // 度量脚本（floor-ceiling 哲学落地）
 export { runMetric, printMetricHelp } from './metrics/runner'
@@ -327,6 +358,14 @@ export type {
     AnchorInstruction,
     RuleInline,
     ArtifactInline,
+    MemoryInline,
+    MemoryConfig,
+    AnchorHooks,
+    ContextItem,
+    HookContext,
+    ContextArchive,
+    AnchorEvent,
+    AnchorEventType,
     VerifyResult,
     VerifyCheck,
     VerifyHooks,

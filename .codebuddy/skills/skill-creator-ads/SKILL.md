@@ -2,9 +2,12 @@
 name: skill-creator-ads
 description: >
   创建高质量 Agent Skill，保证触发准确性和稳定性。
-  当用户想要创建、优化、验证或调试任何 skill 时调用。
+  当用户想要创建、优化、验证或调试任何 skill 时调用；
+  当用户询问 GateLoop 引擎用法、anchor.config/flow.config 配置、
+  如何把现有 skill 改造成 GateLoop harness 模式、
+  该用小的 skill 还是大的流程编排时调用。
   通过 7 阶段门控工作流 + 4 层验证，确保 skill 具有最优的触发准确性、
-  确定性逻辑和最小上下文占用。支持单 skill 创建和多 skill 编排。
+  确定性逻辑和最小上下文占用。支持单 skill（Anchor 层）和多 skill 编排（Flow 层）。
   生成的 skill 为"经验步骤器"：每步强制执行、声明所需知识/上下文、
   通过数据契约调用 MCP（知识库/上下文/记忆），MCP 缺失时降级保持独立可用。
   不要用于通用编码任务、git 操作或非 skill 文件编辑。
@@ -28,12 +31,21 @@ description: >
 
 ```
 用户需要 skill 相关操作？
-├── 创建新 skill？      → Phase 1→7 完整工作流
-├── 优化现有 skill？    → Phase 5(验证) → 6(迭代) → 7(交付)
-├── 多 skill 系统？     → 添加 config.yaml + 编排器章节
-├── 需要 MCP 集成？     → Phase 2 识别契约需求 → Phase 4 设计 step-contracts
-└─── 调试触发问题？     → Layer 1 测试 → 修复 description
+├── 创建新 skill？
+│   → 先决策层次：小 skill（Anchor 层）还是大流程（Flow 层）？
+│     ├── 单一领域、单 skill 内部方法论 → Anchor 层（anchor.config.json）
+│     └── 跨多 skill/agent 流水线      → Flow 层（flow.config.json）
+│   → Phase 1→7 完整工作流
+├── 优化现有 skill？        → Phase 5(验证) → 6(迭代) → 7(交付)
+├── 改造现有 skill 到 GateLoop？  → references/gateloop-engine-guide.md「如何改造现有 skill」
+├── 多 skill 系统？         → Flow 层编排 + 编排器章节
+├── 需要 MCP 集成？         → Phase 2 识别契约需求 → Phase 4 设计 step-contracts
+├── 接记忆/知识库/影响分析？ → references/gateloop-engine-guide.md「通用生命周期钩子」
+└─── 调试触发问题？         → Layer 1 测试 → 修复 description
 ```
+
+> 层次决策、Manifest/Anchor 字段、verify 门禁、通用钩子、改造步骤的完整规范见
+> [references/gateloop-engine-guide.md](references/gateloop-engine-guide.md)。
 
 ## 7 阶段门控工作流
 
@@ -58,6 +70,7 @@ CAPTURE ──→ RESEARCH ──→ ARCHITECT ──→ DRAFT ──→ VALIDAT
 | 5 | 2-3 个真实示例提示词 | 必须 |
 | 6 | 单 skill 还是多 skill 编排？ | 多 skill 时必须 |
 | 7 | 是否需要 MCP 提供的知识库/上下文/记忆？哪些步骤需要？ | 有 MCP 需求时必须 |
+| 8 | **小 skill（Anchor 层）还是大流程（Flow 层）？** 单一领域还是跨 skill 流水线？ | 必须（决定用 anchor.config.json 还是 flow.config.json） |
 
 **退出条件：** 用户确认触发词 + 反触发词 + 2 个示例提示词。
 
@@ -104,11 +117,22 @@ skill-name/                   # kebab-case，与 name 字段一致
 - 🔥 `references/floor-ceiling-guide.md` 缺失 = 结构违规（5类分工不明）
 
 **规则注入方式（三选一，Phase 3 决定）：**
-- **A. ADS harness 模式（推荐）**：`reads` + `rulesInline` 内联，无需 Step 0
+- **A. GateLoop harness 模式（推荐）**：`reads` + `rulesInline` 内联，无需 Step 0
 - **B. 独立 skill**：`RULE.mdc` `alwaysApply: true` 直接注入 System Prompt
 - **C. 显式 `use_skill`**：仅复杂编排时（依赖其他 skill 协作）
 
-**退出条件：** 结构设计完成，内容分配决定完毕。必须确认包含 RULE.mdc 和 floor-ceiling-guide.md。
+**选 A（GateLoop harness 模式）时，必须同时决定以下 GateLoop 引擎配置：**
+- **层次**：Anchor 层（`anchor.config.json`，小 skill）还是 Flow 层（`flow.config.json`，大流程）
+- **anchors 划分**：把 SKILL.md 的 Step 0→N 映射为 anchors[]，每步 = 一个 anchor
+- **verify 门禁**：按 [floor-ceiling-guide.md](references/floor-ceiling-guide.md) 5 类分工配 verify（A 收敛→tsc/lint/custom，B 完备→schema，D 主观→review.model，E 审美→不进）
+- **数据管道**：produces/emits/consumes/reads（artifact 管道）、readsMemory/writesMemory（决策记忆）、readsContext（防衰减上下文存档）
+- **通用钩子**（可选）：beforeAnchor（影响分析/知识库/figma 注入）、afterAnchor（经验记忆/知识库存档）
+- **委派与跳转**（Flow 层）：delegateSkill（委派子 skill）、onPass/onEscalate（非线性跳转 + 环检测）
+
+> 完整字段表、verify 4 阶段 + 3 前置门禁、通用钩子、改造步骤见
+> [references/gateloop-engine-guide.md](references/gateloop-engine-guide.md)。
+
+**退出条件：** 结构设计完成，内容分配决定完毕。必须确认包含 RULE.mdc 和 floor-ceiling-guide.md。若选 GateLoop harness 模式，必须已决定层次（Anchor/Flow）和 anchors 划分。
 
 ### Phase 4：起草
 
@@ -121,14 +145,14 @@ description: >                # ≤1024 字符，第三人称，无 XML 标签
   [功能描述]。当 [触发关键词 + 上下文] 时使用。
   不要用于 [反触发场景]。
 version: 1.0.0
-dependencies: []             # 一般为空；ADS harness 模式下不强制依赖任何 skill
+dependencies: []             # 一般为空；GateLoop harness 模式下不强制依赖任何 skill
 conflict-with: []             # 互斥的 skill
 allowed-tools: [read_file]    # 显式工具白名单（含 MCP 调用所需工具）
 max-token: 1500               # 上下文预算上限
 ---
 ```
 
-> **规则注入方式在 Phase 3 决定**（ADS harness / 独立 skill / use_skill 三选一），不强制 `dependencies: [specflow-rules-engine]`。
+> **规则注入方式在 Phase 3 决定**（GateLoop harness / 独立 skill / use_skill 三选一），不强制 `dependencies: [specflow-rules-engine]`。
 
 **description 结构（3 个必需部分）：**
 
@@ -308,7 +332,7 @@ step-contracts:
    - [ ] examples 包含正向 AND 负向触发示例
    - [ ] 有 MCP 需求时：step-contracts 已声明且 providers≥2 级
    - [ ] 有 MCP 需求时：核心逻辑零 MCP 工具名（Layer 5 通过）
-   - [ ] 规则注入方式已在 Phase 3 决定（ADS harness / 独立 skill / use_skill）
+   - [ ] 规则注入方式已在 Phase 3 决定（GateLoop harness / 独立 skill / use_skill）
 4. 向用户展示结构 + 快速上手指南
 
 ---
@@ -460,8 +484,8 @@ MCP 缺失 → 降级到内置工具 / 本地 references / 问用户
 | 🔥 **无中断恢复机制** | SKILL.md 必须包含中断恢复章节 |
 | 🔥 **主观维度"模型自评不进verify"** | 升级为类型D review.model 四道门禁（逐条评+带证据+fail必改） |
 | 🔥 **全收敛型硬配review** | 无主观维度不配review（如 code-quality-guard），全 exit code |
-| 强制 `depends-on: [specflow-rules-engine]` | 已迁移 ADS harness，规则注入方式三选一（见 Phase 3） |
-| 强制 Step 0 规则注入 | ADS harness 模式由 reads + rulesInline 自动内联，无需 Step 0 |
+| 强制 `depends-on: [specflow-rules-engine]` | 已迁移 GateLoop harness，规则注入方式三选一（见 Phase 3） |
+| 强制 Step 0 规则注入 | GateLoop harness 模式由 reads + rulesInline 自动内联，无需 Step 0 |
 | 脚本中的魔法数字 | 记录每个常量的理由 |
 | 时间信息（"v2 之后"） | 改用遗留/弃用章节 |
 | 术语混用 | 选一个术语，全篇统一 |
@@ -470,6 +494,11 @@ MCP 缺失 → 降级到内置工具 / 本地 references / 问用户
 | **契约 providers 只有一级（仅 mcp）** | 至少 mcp + builtin/fallback 两级 |
 | **硬依赖用 on-missing: degrade** | 改为 block 或 ask |
 | **软依赖用 on-missing: block** | 改为 degrade |
+| **小 skill 硬套 Flow 层** | 单一领域单 skill 用 Anchor 层（anchor.config.json）；Flow 层只在跨 2+ skill 时用 |
+| **anchors 划分过细（一个动作一个 anchor）** | 每个 anchor 应是一个有明确产物+可验证的阶段（见 gateloop-engine-guide.md） |
+| **anchor 缺失 verify 门禁** | 每个 anchor 必须配 verify（按 floor-ceiling 5 类），否则跳步无拦截 |
+| **Flow 层忘配 readsContext/writesMemory** | 跨 skill 流水线必须用 readsContext 防衰减、writesMemory 沉淀决策（见 gateloop-engine-guide.md） |
+| **onEscalate 无环检测** | 回滚跳转必须配 maxJumps，防死循环（引擎默认 3） |
 
 ---
 
@@ -482,7 +511,7 @@ MCP 缺失 → 降级到内置工具 / 本地 references / 问用户
 | **上下文效率** | 元数据精简，正文 <500 行，资源懒加载，RULE.mdc 替代长文本 |
 | **错误处理** | 每个步骤有显式错误路径 + 恢复操作 |
 | **可验证性** | 清单 + 每阶段退出条件 + 评估模板 |
-| **协作就绪** | config.yaml 完整，规则注入方式已决定（ADS/独立/use_skill），mutual-exclude 已定义 |
+| **协作就绪** | config.yaml 完整，规则注入方式已决定（GateLoop/独立/use_skill），mutual-exclude 已定义 |
 | **执行力** | 任务式流程 + 中断恢复机制 + 规则注入方式明确 |
 | **脚本/模型分工** | floor-ceiling-guide.md 已产出，每条规则标注 5 类归属（A收敛exit/B完备schema/C度量回灌/D主观review/E纯审美） |
 | **自由度匹配** | 指令与任务脆弱性等级匹配（高/中/低） |
@@ -494,6 +523,8 @@ MCP 缺失 → 降级到内置工具 / 本地 references / 问用户
 
 | 文件 | 内容 |
 |------|------|
+| [references/gateloop-engine-guide.md](references/gateloop-engine-guide.md) | ★ GateLoop 引擎完整用法：两层架构（小 skill vs 大流程）、Manifest/Anchor 字段、verify 门禁、通用钩子、改造现有 skill |
+| [references/floor-ceiling-guide.md](references/floor-ceiling-guide.md) | 脚本 vs 模型 5 类分工判定表（A收敛/B完备/C度量/D主观review/E纯审美） |
 | [references/freedom-levels.md](references/freedom-levels.md) | 自由度匹配指南，含决策矩阵 |
 | [references/writing-patterns.md](references/writing-patterns.md) | 正文模板、输出格式、决策树、步骤器写法 |
 | [references/contract-pattern.md](references/contract-pattern.md) | 数据契约完整规范、MCP 集成标准、示例 |
