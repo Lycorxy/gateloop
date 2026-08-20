@@ -13,7 +13,10 @@
 import { readFileSync, writeFileSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { gitExec, gitExecOrThrow, isGitRepo, getGitRoot } from './executor'
+import { generateGitAttributes } from './config'
 import type { LineEnding, LineEndingReport, GitResult } from './types'
+
+export { generateGitAttributes }
 
 // ==================== 常量 ====================
 
@@ -422,35 +425,7 @@ export async function fixLineEndings(
 }
 
 // ==================== .gitattributes 管理 ====================
-
-/**
- * 生成 .gitattributes 内容
- */
-export function generateGitAttributes(lineEnding: LineEnding): string {
-    const endingRule = lineEnding === 'lf' ? 'text eol=lf' : 'text eol=crlf'
-
-    return `# 自动生成的 .gitattributes - 换行符配置
-# 由 node-ultra git 工具管理
-
-# 默认行为：统一换行符为 ${lineEnding.toUpperCase()}
-* ${endingRule}
-
-# 二进制文件（不做转换）
-*.png binary
-*.jpg binary
-*.jpeg binary
-*.gif binary
-*.ico binary
-*.pdf binary
-*.zip binary
-*.tar binary
-*.gz binary
-*.woff binary
-*.woff2 binary
-*.ttf binary
-*.eot binary
-`
-}
+// generateGitAttributes 由 ./config 提供（见文件顶部 import 与 re-export），避免重复实现
 
 /**
  * 写入 .gitattributes 文件

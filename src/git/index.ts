@@ -28,6 +28,9 @@
  */
 
 import { SnapshotManager, SafetyNet } from './backup'
+import { ActivityLog } from './activitylog'
+import type { ActionRecord } from './activitylog'
+import { errorResult } from './result'
 import { GitOperator } from './operations'
 import { DiffViewer } from './diff'
 import { SSHManager } from './ssh'
@@ -37,15 +40,18 @@ import { SshRemoteService } from './ssh-remote'
 import { BranchService } from './branch'
 import { isGitRepo, getGitRoot, getCurrentBranch, getHeadCommit, isWorktreeClean } from './executor'
 import { checkLineEndings, fixLineEndings, setupGitAttributes } from './line-ending'
+import { setupGitIgnore, setupEditorConfig, setupProjectConfig } from './config'
 import type {
     GitManagerConfig,
     GitResult,
+    GitOperation,
     StageOptions,
     CommitOptions,
     DiffOptions,
     LineEnding,
     SSHSetupOptions,
-    SSHAccount
+    SSHAccount,
+    ConfigSetupOptions
 } from './types'
 
 // ==================== Git 管理器 ====================
@@ -75,6 +81,8 @@ export class GitManager {
     sshRemoteService: SshRemoteService
     /** 分支服务（版本管理 + release/feature 命名） */
     branchService: BranchService
+    /** 操作行为日志（记录关键操作 + 回退锚点，供快速回滚） */
+    activityLog: ActivityLog
 
     private config: Required<GitManagerConfig>
     private initialized: boolean = false
@@ -103,6 +111,9 @@ export class GitManager {
         this.remoteService = new RemoteService()
         this.sshRemoteService = new SshRemoteService()
         this.branchService = new BranchService(this.config.cwd)
+
+        // 操作行为日志（与快照放同一目录）
+        this.activityLog = new ActivityLog(this.snapshotManager.getSnapshotDir())
     }
 
     /**
@@ -116,6 +127,7 @@ export class GitManager {
 
         // 跳过 SnapshotManager 内部的 isGitRepo 检查，避免 Windows 下连续 spawn hang
         await this.snapshotManager.initDirect()
+        this.activityLog.init()
         this.initialized = true
 
         if (this.config.enableLog) {
@@ -207,7 +219,12 @@ export class GitManager {
      */
     async commit(options: CommitOptions): Promise<GitResult> {
         this.ensureReady()
-        return this.operator.commit(options)
+        return this.withActivity(
+            'commit',
+            `提交: ${options.message}`,
+            () => this.operator.commit(options),
+            { meta: { message: options.message } }
+        )
     }
 
     // ==================== 回退操作 ====================
@@ -263,6 +280,121 @@ export class GitManager {
     getSnapshotCount(): number {
         this.ensureReady()
         return this.snapshotManager.getCount()
+    }
+
+    // ==================== 操作行为日志 / 快速回滚 ====================
+
+    /**
+     * 关键操作统一入口：
+     * 1. 操作前自动创建快照（或可复用 operator 已创建的快照）
+     * 2. 执行操作
+     * 3. 在操作行为日志中记录一条「行为 + 快照锚点」
+     *
+     * 这样用户可以在 `nut git activity` 看到「做了什么」，
+     * 并用 `nut git undo` / `nut git rollback --action <序号>` 精准回退到某次操作前。
+     */
+    private async withActivity<T>(
+        action: string,
+        description: string,
+        run: () => Promise<T>,
+        opts: { snapshot?: boolean; meta?: Record<string, unknown> } = {}
+    ): Promise<T> {
+        const before = this.snapshotManager.getCount()
+
+        // 若该关键场景自身不带快照（如 mergeToTest / createMR 等上层流程），则在此兜底打一个
+        let forcedSnapshotId: string | undefined
+        if (opts.snapshot && this.config.autoBackup) {
+            forcedSnapshotId = await this.snapshotBefore(action, description)
+        }
+
+        const result = await run()
+
+        // 关联快照锚点：优先用本次显式创建的；否则取 operator 在执行期间刚创建的快照
+        let snapshotId = forcedSnapshotId
+        if (!snapshotId && this.snapshotManager.getCount() > before) {
+            snapshotId = this.snapshotManager.getCurrentSnapshot()?.id
+        }
+
+        const r = result as { success?: boolean; error?: string }
+        const isNullish = result === null || result === undefined
+        const failed = r.success === false || isNullish
+
+        await this.activityLog.record({
+            action,
+            description,
+            branch: await this.getCurrentBranch().catch(() => undefined),
+            snapshotId,
+            result: failed ? 'failed' : 'success',
+            error: r.error,
+            meta: opts.meta
+        })
+
+        // 把快照 ID 顺带给调用方（如 GitResult.snapshotId），方便上层展示
+        if (snapshotId) {
+            ;(result as { snapshotId?: string }).snapshotId = snapshotId
+        }
+        return result
+    }
+
+    /** 为未自带备份的关键场景创建一个「操作前快照」 */
+    private async snapshotBefore(
+        action: GitOperation | string,
+        description: string
+    ): Promise<string | undefined> {
+        try {
+            const snap = await this.snapshotManager.createSnapshot(action as GitOperation, {
+                description,
+                includeUnstaged: true,
+                includeUntracked: true
+            })
+            return snap.id
+        } catch {
+            return undefined
+        }
+    }
+
+    /** 列出操作行为日志（供 `nut git activity` 使用） */
+    listActivity(): ActionRecord[] {
+        return this.activityLog.list()
+    }
+
+    /**
+     * 撤销上一步操作：回退到上一次操作执行前的快照。
+     * 若上一步是纯远程操作（如 MR）没有本地快照，则提示无法本地回退。
+     */
+    async undo(): Promise<GitResult> {
+        this.ensureReady()
+        const last = this.activityLog.getLast()
+        if (!last) {
+            return errorResult('restore', '没有可撤销的操作记录', 'NO_ACTIVITY')
+        }
+        if (!last.snapshotId) {
+            return errorResult(
+                'restore',
+                `上一步「${last.description}」没有可回退的本地快照（如纯远程 MR 操作），需手动处理`,
+                'NO_SNAPSHOT'
+            )
+        }
+        return this.snapshotManager.restoreSnapshot(last.snapshotId, { backupFirst: true })
+    }
+
+    /**
+     * 回退到指定操作步骤执行前的状态（按行为序号或 ID）。
+     */
+    async rollbackToAction(idOrSeq: string): Promise<GitResult> {
+        this.ensureReady()
+        const rec = this.activityLog.resolve(idOrSeq)
+        if (!rec) {
+            return errorResult('restore', `未找到操作记录: ${idOrSeq}`, 'ACTION_NOT_FOUND')
+        }
+        if (!rec.snapshotId) {
+            return errorResult(
+                'restore',
+                `操作「${rec.description}」没有可回退的本地快照（如纯远程 MR 操作），需手动处理`,
+                'NO_SNAPSHOT'
+            )
+        }
+        return this.snapshotManager.restoreSnapshot(rec.snapshotId, { backupFirst: true })
     }
 
     // ==================== 安全网 ====================
@@ -369,6 +501,28 @@ export class GitManager {
         return this.operator.deleteBranch(name, force)
     }
 
+    /**
+     * 将指定（或当前）分支 rebase 到目标分支
+     *
+     * 流程：stash → checkout → fetch → rebase → stash pop。
+     * 冲突时自动 abort rebase 并恢复 stash，返回 CONFLICT 提示手动继续。
+     * 不自动 force-push（rebase 改写历史，推送需用户显式确认）。
+     *
+     * @param options.branch 要 rebase 的分支（默认当前分支）
+     * @param options.onto   rebase 的目标基准（默认 master）
+     */
+    async rebase(options?: { branch?: string; onto?: string }): Promise<GitResult> {
+        this.ensureReady()
+        const onto = options?.onto || 'master'
+        const branch = options?.branch
+        return this.withActivity(
+            'rebase',
+            `rebase ${branch || '(当前分支)'} → ${onto}`,
+            () => this.operator.rebase(options),
+            { meta: { branch, onto } }
+        )
+    }
+
     // ==================== Stash 操作 ====================
 
     /** 暂存工作区 */
@@ -455,6 +609,37 @@ export class GitManager {
     async setupGitAttributes(lineEnding?: LineEnding): Promise<GitResult> {
         this.ensureReady()
         return setupGitAttributes(this.config.cwd, lineEnding || this.config.defaultLineEnding)
+    }
+
+    /**
+     * 生成 / 完善 .gitignore
+     *
+     * 文件已存在时默认仅追加缺失的推荐项（不覆盖），--force 才覆盖重写。
+     */
+    async setupGitIgnore(options?: ConfigSetupOptions): Promise<GitResult> {
+        this.ensureReady()
+        return setupGitIgnore(this.config.cwd, options)
+    }
+
+    /**
+     * 生成 / 完善 .editorconfig
+     */
+    async setupEditorConfig(options?: ConfigSetupOptions): Promise<GitResult> {
+        this.ensureReady()
+        return setupEditorConfig(this.config.cwd, options)
+    }
+
+    /**
+     * 一键生成 / 完善项目 Git 配置（.gitattributes + .gitignore + .editorconfig）
+     *
+     * 默认仅追加缺失推荐项，不覆盖已有配置；options.force=true 时覆盖重写。
+     */
+    async setupProjectConfig(options?: ConfigSetupOptions): Promise<GitResult> {
+        this.ensureReady()
+        return setupProjectConfig(this.config.cwd, {
+            lineEnding: options?.lineEnding || this.config.defaultLineEnding,
+            force: options?.force
+        })
     }
 
     // ==================== SSH 配置 ====================
@@ -611,7 +796,12 @@ export class GitManager {
         title: string
         reviewerIds?: number[]
     }): Promise<{ success: boolean; url?: string; manualUrl?: string; error?: string }> {
-        return this.remoteService.createMR(options)
+        return this.withActivity(
+            'createMR',
+            `创建 MR: ${options.sourceBranch} → ${options.targetBranch}`,
+            () => this.remoteService.createMR(options),
+            { meta: { sourceBranch: options.sourceBranch, targetBranch: options.targetBranch } }
+        )
     }
 
     /** 检查 MR 是否已存在（防重复创建） */
@@ -665,13 +855,11 @@ export class GitManager {
      * 创建 release + feature 分支（一步完成）
      *
      * @param options.version 版本号（如 1.2.0）
-     * @param options.featureDesc 功能描述（如 user-login）
      * @param options.projectKey Monorepo 项目 key（可选）
      * @param options.useRelease 是否创建 release 分支（false 则 feature 直接基于 master）
      */
     async createReleaseFeatureBranches(options: {
         version: string
-        featureDesc: string
         projectKey?: string
         useRelease: boolean
     }): Promise<{
@@ -697,16 +885,115 @@ export class GitManager {
         return this.branchService.deleteBranch(branchName, deleteLocal)
     }
 
-    /** 列出可管理的远程分支（匹配 release/feature 命名规范） */
+    /**
+     * 创建 feature / hotfix 分支（从 master 切出并推送）
+     *
+     * @param type 'feature'（需求）| 'hotfix'（缺陷修复）
+     * @param version 版本号（如 1.2.0）
+     * @param projectKey Monorepo 项目 key（可选）
+     * @returns 分支名；失败返回 null
+     */
+    async createBranchByType(
+        type: 'feature' | 'hotfix',
+        version: string,
+        projectKey?: string
+    ): Promise<string | null> {
+        return this.withActivity(
+            'createBranch',
+            `创建 ${type} 分支 (v${version})`,
+            () => this.branchService.createBranchByType(type, version, projectKey),
+            { snapshot: true, meta: { type, version, projectKey } }
+        )
+    }
+
+    /** 创建并推送 tag（v{ver} / {key}-v{ver}） */
+    async createTag(tagName: string, message?: string): Promise<boolean> {
+        return this.withActivity(
+            'createTag',
+            `打 tag: ${tagName}`,
+            () => this.branchService.createTag(tagName, message),
+            { snapshot: true, meta: { tagName, message } }
+        )
+    }
+
+    /** 列出远程 tags（匹配命名规范，按版本倒序） */
+    async listTags(projectKey?: string): Promise<string[]> {
+        return this.branchService.listTags(projectKey)
+    }
+
+    /** 列出可管理的远程分支（匹配 release/feature/hotfix 命名规范） */
     async listManagedBranches(projectKey?: string): Promise<
         Array<{
             name: string
-            type: 'release' | 'feature'
+            type: 'release' | 'feature' | 'hotfix'
             version: string
             featureDesc?: string
         }>
     > {
         return this.branchService.listManagedBranches(projectKey)
+    }
+
+    /**
+     * 合并源分支到 test 测试分支并推送（发布测试环境）
+     *
+     * 多人并发开发时，各人 feature/hotfix 开发完成后调用此方法，
+     * 自动切换到 test、合并、推送并切回源分支。
+     *
+     * @param sourceBranch 要合并到 test 的源分支（feature/hotfix），默认当前分支
+     * @returns 合并结果
+     */
+    async mergeToTest(
+        sourceBranch?: string
+    ): Promise<{ success: boolean; testBranch: string; error?: string }> {
+        const branch = sourceBranch || (await this.getCurrentBranch())
+        return this.withActivity(
+            'mergeToTest',
+            `合并 ${branch} → test（含推送）`,
+            () => this.branchService.mergeToTest(branch),
+            { snapshot: true, meta: { sourceBranch: branch, targetBranch: 'test' } }
+        )
+    }
+
+    /**
+     * 预览合并到 test：无冲突则自动合并并推送，有冲突则中止并提示手动合并
+     *
+     * 与 mergeToTest 区别：冲突时返回 conflict=true 明确标记，便于引导手动解决。
+     *
+     * @param sourceBranch 要合并到 test 的源分支（feature/hotfix），默认当前分支
+     */
+    async previewMergeToTest(
+        sourceBranch?: string
+    ): Promise<{ success: boolean; testBranch: string; conflict?: boolean; error?: string }> {
+        const branch = sourceBranch || (await this.getCurrentBranch())
+        return this.withActivity(
+            'previewMergeToTest',
+            `预览合并 ${branch} → test（含推送）`,
+            () => this.branchService.previewMergeToTest(branch),
+            { snapshot: true, meta: { sourceBranch: branch, targetBranch: 'test' } }
+        )
+    }
+
+    /**
+     * 判断分支是否允许通过命令删除（仅 feature/hotfix）
+     */
+    async isDeletableBranch(branchName: string): Promise<boolean> {
+        return this.branchService.isDeletableBranch(branchName)
+    }
+
+    /**
+     * 安全删除分支（仅 feature/hotfix，远程 + 本地）
+     *
+     * 其它分支（master/test/release 等）一律拒绝删除，避免误删受保护分支。
+     *
+     * @param branchName 要删除的分支（仅 feature/hotfix 允许）
+     * @param deleteLocal 是否同时删除本地分支
+     * @returns 删除结果（reason: 'protected' 表示受保护分支）
+     */
+    async deleteDeletableBranch(
+        branchName: string,
+        deleteLocal = true
+    ): Promise<{ success: boolean; error?: string; reason?: 'protected' | 'git' }> {
+        return this.branchService.deleteDeletableBranch(branchName, deleteLocal)
     }
 
     // ==================== 统计信息 ====================
@@ -758,6 +1045,8 @@ export { AuthService } from './auth'
 export { RemoteService } from './remote'
 export { SshRemoteService } from './ssh-remote'
 export { BranchService } from './branch'
+export { ActivityLog } from './activitylog'
+export type { ActionRecord, ActionResult } from './activitylog'
 export {
     setupSSH,
     setupMultiAccountSSH,
@@ -778,19 +1067,36 @@ export {
     detectProjectKey,
     getReleaseName,
     getFeatureName,
+    getHotfixName,
+    getTagName,
     parseBranchInfo,
     getLatestVersionFromRemote,
     hasRemoteBranch,
     hasLocalBranch,
     createAndPushBranch,
+    createAndPushTag,
+    listTags,
     commitVersionChange,
     deleteRemoteBranch,
-    listManagedBranches
+    listManagedBranches,
+    mergeToTest,
+    previewMergeToTest,
+    isDeletableBranch,
+    deleteDeletableBranch,
+    DELETABLE_BRANCH_TYPES,
+    TEST_BRANCH
 } from './branch'
 export type { GitLabToken } from './auth'
 export type { MRState, CreateMROptions, MRInfo, CreateMRResult } from './remote'
 export type { SSHKeyInfo, UploadKeyResult, VerifyTokenResult } from './types'
-export type { VersionInfo, VersionBumpType, ProjectInfo, BranchResult, BranchInfo } from './branch'
+export type {
+    VersionInfo,
+    VersionBumpType,
+    ProjectInfo,
+    BranchResult,
+    BranchInfo,
+    BranchType
+} from './branch'
 export {
     gitExec,
     gitExecOrThrow,
@@ -809,6 +1115,14 @@ export {
     setupGitAttributes,
     generateGitAttributes
 } from './line-ending'
+export {
+    setupGitIgnore,
+    setupEditorConfig,
+    setupProjectConfig,
+    generateGitIgnore,
+    generateEditorConfig
+} from './config'
+export type { ConfigSetupOptions } from './types'
 export type { GitExecOptions, GitExecResult } from './executor'
 export type {
     Snapshot,

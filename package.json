@@ -1,6 +1,6 @@
 {
     "name": "ai-ultra",
-    "version": "0.0.0-beta.5",
+    "version": "0.0.0-beta.7",
     "description": "🚀 ai-ultra - 为模型提供统一的命令行工具集（代码执行、格式化、Lint 知识库生成）",
     "type": "module",
     "main": "./dist/lint/index.cjs",

@@ -8,6 +8,7 @@
 import { gitExec, gitExecOrThrow, gitExecLines, getCurrentBranch, getStagedFiles } from './executor'
 import { SnapshotManager } from './backup'
 import { checkAndFixLineEndings } from './line-ending'
+import { successResult, errorResult } from './result'
 import type {
     GitResult,
     StageOptions,
@@ -36,48 +37,6 @@ function validateBranchName(name: string): void {
     // 禁止包含 .. 防止路径遍历
     if (name.includes('..')) {
         throw new Error('分支名包含非法字符')
-    }
-}
-
-/**
- * 创建成功结果
- */
-function successResult(
-    operation: GitOperation,
-    message: string,
-    data?: unknown,
-    snapshotId?: string,
-    duration: number = 0
-): GitResult {
-    return {
-        success: true,
-        operation,
-        message,
-        snapshotId,
-        data,
-        duration,
-        summary:
-            typeof data === 'object' && data !== null
-                ? (data as Record<string, unknown>)
-                : undefined
-    }
-}
-
-/**
- * 创建失败结果
- */
-function errorResult(
-    operation: GitOperation,
-    message: string,
-    error?: string,
-    duration: number = 0
-): GitResult {
-    return {
-        success: false,
-        operation,
-        message,
-        error,
-        duration
     }
 }
 
@@ -375,7 +334,9 @@ export class GitOperator {
             }
 
             // 根据模式执行不同的 reset
-            const resetMode = mode === 'soft' ? '--soft' : mode === 'mixed' ? '--mixed' : '--hard'
+            let resetMode = '--hard'
+            if (mode === 'soft') resetMode = '--soft'
+            else if (mode === 'mixed') resetMode = '--mixed'
             if (snapshot.headCommit) {
                 await gitExecOrThrow(['reset', resetMode, snapshot.headCommit], { cwd: this.cwd })
             }
@@ -1065,6 +1026,129 @@ export class GitOperator {
                 Date.now() - startTime
             )
         }
+    }
+
+    /**
+     * 将指定（或当前）分支 rebase 到目标分支
+     *
+     * 流程：stash → checkout branch → fetch target → rebase target → stash pop
+     * 冲突时自动 abort rebase、恢复 stash，返回 CONFLICT 提示用户手动继续；
+     * 不自动 force-push（rebase 改写历史，推送需用户显式确认）。
+     *
+     * @param options.branch 要 rebase 的分支（默认当前分支）
+     * @param options.onto   rebase 的目标基准（默认 master）
+     */
+    async rebase(options: { branch?: string; onto?: string } = {}): Promise<GitResult> {
+        const startTime = Date.now()
+        const onto = options.onto || 'master'
+        validateBranchName(onto)
+        const currentBranch = await getCurrentBranch(this.cwd)
+        const branch = options.branch || currentBranch
+
+        if (branch === onto) {
+            return errorResult(
+                'rebase',
+                `分支 ${branch} 与目标 ${onto} 相同，无法 rebase`,
+                'SAME_BRANCH',
+                Date.now() - startTime
+            )
+        }
+
+        await this.preBackup('rebase', `rebase ${branch} onto ${onto}`)
+
+        const originalBranch = currentBranch
+        const didStash = await this.stashChangesIfNeeded()
+
+        let rebaseResult: { success: boolean; message: string; code: string }
+        try {
+            if (branch !== originalBranch) {
+                await gitExecOrThrow(['checkout', branch], { cwd: this.cwd })
+            }
+            const targetRef = await this.resolveTargetRef(onto)
+            rebaseResult = await this.execRebase(targetRef)
+        } catch (error) {
+            rebaseResult = {
+                success: false,
+                message: 'rebase 失败',
+                code: (error as Error).message
+            }
+        } finally {
+            if (didStash) await this.restoreStash()
+            if (branch !== originalBranch) {
+                try {
+                    await gitExecOrThrow(['checkout', originalBranch], { cwd: this.cwd })
+                } catch {
+                    // 忽略
+                }
+            }
+        }
+
+        if (!rebaseResult.success) {
+            return errorResult(
+                'rebase',
+                rebaseResult.message,
+                rebaseResult.code,
+                Date.now() - startTime
+            )
+        }
+        return successResult(
+            'rebase',
+            `已将 ${branch} rebase 到 ${onto}`,
+            { branch, onto },
+            undefined,
+            Date.now() - startTime
+        )
+    }
+
+    /** 执行 rebase 并检测冲突；冲突时自动 abort 并返回结构化结果 */
+    private async execRebase(
+        targetRef: string
+    ): Promise<{ success: boolean; message: string; code: string }> {
+        const r = await gitExec(['rebase', targetRef], { cwd: this.cwd })
+        if (r.success) {
+            return { success: true, message: '', code: '' }
+        }
+        const hasConflict = r.stderr.includes('CONFLICT') || r.stderr.includes('could not apply')
+        try {
+            await gitExecOrThrow(['rebase', '--abort'], { cwd: this.cwd })
+        } catch {
+            // 忽略
+        }
+        if (hasConflict) {
+            return {
+                success: false,
+                message:
+                    'Rebase 存在冲突，已中止。请手动: git rebase --continue（解决后）/ git rebase --abort（放弃）',
+                code: 'CONFLICT'
+            }
+        }
+        return { success: false, message: r.stderr || 'rebase 失败', code: 'REBASE_FAILED' }
+    }
+
+    /** 解析 rebase 目标引用：优先使用远程跟踪分支（确保拿到最新提交） */
+    private async resolveTargetRef(onto: string): Promise<string> {
+        try {
+            const r = await gitExec(['rev-parse', '--verify', `origin/${onto}`], {
+                cwd: this.cwd,
+                silent: true
+            })
+            if (r.success && r.stdout.trim()) {
+                try {
+                    await gitExecOrThrow(['fetch', 'origin', onto], { cwd: this.cwd, silent: true })
+                } catch {
+                    // 忽略 fetch 失败，回退到已有远程引用
+                }
+                return `origin/${onto}`
+            }
+        } catch {
+            // 忽略
+        }
+        return onto
+    }
+
+    /** 恢复 stash（pop） */
+    private async restoreStash(): Promise<void> {
+        await gitExec(['stash', 'pop'], { cwd: this.cwd })
     }
 
     /** 如果有未提交更改则 stash */

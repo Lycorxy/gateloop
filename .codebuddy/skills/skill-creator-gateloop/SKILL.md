@@ -1,10 +1,10 @@
 ---
-name: skill-creator-ads
+name: skill-creator-gateloop
 description: >
-  创建高质量 Agent Skill，保证触发准确性和稳定性。
+  创建高质量 GateLoop Skill（被门控闭环引擎驱动的 skill）。
   当用户想要创建、优化、验证或调试任何 skill 时调用；
   当用户询问 GateLoop 引擎用法、anchor.config/flow.config 配置、
-  如何把现有 skill 改造成 GateLoop harness 模式、
+  如何把现有 skill 改造成 GateLoop Skill（GateLoop harness 模式）、
   该用小的 skill 还是大的流程编排时调用。
   通过 7 阶段门控工作流 + 4 层验证，确保 skill 具有最优的触发准确性、
   确定性逻辑和最小上下文占用。支持单 skill（Anchor 层）和多 skill 编排（Flow 层）。
@@ -13,19 +13,42 @@ description: >
   不要用于通用编码任务、git 操作或非 skill 文件编辑。
 ---
 
-# Skill Creator Pro v3
+# GateLoop Skill Creator
 
-> 本版核心：skill = 经验步骤器。每步强制执行 + 声明知识需求 + 数据契约调用 MCP + 降级保独立。
+> 本 skill 用于创建 GateLoop Skill —— 即被 GateLoop（门控闭环引擎）驱动的 skill。
+> 核心：skill = 经验步骤器。每步强制执行 + 声明知识需求 + 数据契约调用 MCP + 降级保独立。
+> GateLoop 三支柱：门控（确定的交给脚本）+ 闭环（执行-验证-修复逼收敛）+ 底座（引擎强制推进，防信息衰减）。
 
 ## 🛑 入口守卫
 
 ```
-本 Skill 加载后必须按 Phase 1→...→7 门控工作流执行全部阶段。
+本 Skill（GateLoop Skill Creator）加载后必须按 Phase 1→...→7 门控工作流执行全部阶段。
 每阶段通过后才可进入下一阶段，禁止跳阶段。
 如需跳过某阶段，必须逐条给出充足理由：①为什么可跳过 ②跳过不影响最终输出。禁止批量跳过。
 ```
 
-创建专业级 Agent Skill，具备最优可发现性、确定性执行和最小上下文占用。
+创建专业级 GateLoop Skill，具备最优可发现性、确定性执行和最小上下文占用。
+
+### 三种形态区分（创建前必读）
+
+| | 普通 Skill | GateLoop Skill（本 skill 创建的产物） |
+|---|---|---|
+| 文件 | 只有 SKILL.md | SKILL.md + anchor.config.json（或 flow.config.json） |
+| 执行靠 | 模型自觉（播报防跳步） | 引擎门控（verify 强制，exit code 守门） |
+| 跳步后果 | 靠模型自律，可能跳 | verify 不过 = 卡住，跳不了 |
+| 上下文 | 模型自己找 | 引擎自动内联（规则/产物/决策/上下文存档） |
+| 定位 | "一份提示词" | "被门控闭环驱动的执行单元" |
+
+**本 skill 的职责**：把"普通 Skill"升级成"GateLoop Skill"——给它配上 manifest（anchors + verify + 钩子），让它获得门控推进、闭环收敛、防衰减、事件通知四项能力。
+
+### GateLoop Skill 的两种层次
+
+```
+Anchor 层（小 skill，anchor.config.json）  单一领域内部方法论，门控防跳步
+Flow 层（大流程，flow.config.json）        跨多 skill 编排，上下文防衰减
+```
+
+边界：开发 + 测试进自动闭环，发布人工手动（详见 [references/gateloop-engine-guide.md](references/gateloop-engine-guide.md)「边界」）。
 
 ## 快速决策树
 

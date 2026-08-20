@@ -1,0 +1,126 @@
+# ── 触发与优先级 ──
+priority: 90
+auto-trigger: true
+trigger-keywords:
+  - figma还原
+  - figma还原优化
+  - 还原度不够
+  - 继续优化还原
+  - 布局对比
+  - DSL对比
+  - 设计稿对齐
+  - 修复还原
+  - UI对齐
+  - 逐层对比
+  - 调整布局结构
+  - 优化样式结构
+  - 整体布局
+  - 具体还原
+  - 先分析后修复
+  - 从外到内对比
+  - 代码定位
+  - 渲染验证
+  - 渲染对比
+  - 相似度
+  - 量化还原
+  - 技巧诊断
+  - 内联标签
+  - CSS技巧
+  - 高保真还原
+
+# ── 依赖关系（GateLoop harness 模式，不强制依赖 specflow-rules-engine）──
+depends-on: []
+mutual-exclude: []
+require-tools:
+  - mcp_call_tool
+  - read_file
+  - replace_in_file
+  - search_content
+  - search_file
+  - execute_command
+  - web_fetch
+
+# ── 生命周期 ──
+load-strategy: lazy
+unload-after-run: true
+max-duration: 300
+
+# ── 触发权重 ──
+trigger-weight:
+  figma还原: 95
+  figma还原优化: 90
+  还原度不够: 80
+  继续优化还原: 75
+  布局对比: 85
+  DSL对比: 80
+  设计稿对齐: 85
+  修复还原: 90
+  UI对齐: 85
+  逐层对比: 75
+  调整布局结构: 80
+  优化样式结构: 80
+  整体布局: 80
+  具体还原: 85
+  先分析后修复: 95
+  从外到内对比: 90
+  代码定位: 85
+  渲染验证: 90
+  渲染对比: 88
+  相似度: 85
+  量化还原: 90
+  技巧诊断: 85
+  内联标签: 88
+  CSS技巧: 82
+  高保真还原: 92
+
+# ── MCP 能力声明 ──
+mcp-capabilities:
+  - server: "figma-trimly"
+    optional: false
+
+# ── 数据契约（MCP 集成标准）──
+# skill 依赖「数据契约」不依赖「MCP 工具」。MCP 是契约的一个实现，缺失时降级。
+step-contracts:
+  - id: figma-dsl-data
+    step: "1.1"
+    criticality: required
+    input:
+      figma_url: "用户提供的 Figma 设计稿 URL"
+      node_id: "Figma 节点 ID（从 URL 提取）"
+    output:
+      origin_dsl: "figma DSL JSON（设计稿结构/样式/标注）"
+      spacing_report: "盒模型间距数据（containers padding + siblings gap）"
+      baseline_diff: "DSL 渲染与设计稿的基线 diff"
+    providers:
+      - mcp:
+          server: "figma-trimly"
+          tool: "figma_baseline_compare"
+          params:
+            url: "{input.figma_url}"
+            nodeId: "{input.node_id}"
+      - fallback: "ask-user"
+    on-missing: ask
+
+  - id: render-compare
+    step: "3.7"
+    criticality: preferred
+    input:
+      figma_url: "Figma 设计稿 URL"
+      verify_html_path: "构建的验证 HTML 文件路径"
+      dsl_file_path: "origin-dsl.json 路径（启用文字遮罩）"
+    output:
+      similarity: "渲染相似度百分比（0-100）"
+      render_png: "渲染结果截图"
+      diff_png: "差异对比图"
+    providers:
+      - mcp:
+          server: "figma-trimly"
+          tool: "figma_compare_html_file"
+          params:
+            url: "{input.figma_url}"
+            htmlFilePath: "{input.verify_html_path}"
+            dslFilePath: "{input.dsl_file_path}"
+      - builtin:
+          strategy: "figma_baseline_compare diff 面积计算 + 差异表闭合率（模式 B）"
+      - fallback: "static-closure"
+    on-missing: degrade

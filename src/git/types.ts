@@ -20,6 +20,10 @@ export type GitOperation =
     | 'stash'
     | 'backup'
     | 'restore'
+    | 'setupGitAttributes'
+    | 'setupGitIgnore'
+    | 'setupEditorConfig'
+    | 'setupProjectConfig'
 
 /** Git 操作状态 */
 export enum GitStatus {
@@ -495,6 +499,16 @@ export interface LineEndingReport {
         current: LineEnding | 'mixed'
         expected: LineEnding
     }[]
+}
+
+// ==================== 项目配置生成类型 ====================
+
+/** 项目 Git 配置生成选项（.gitattributes / .gitignore / .editorconfig） */
+export interface ConfigSetupOptions {
+    /** 目标换行符（用于 .gitattributes / .editorconfig） */
+    lineEnding?: LineEnding
+    /** 已存在时是否覆盖重写（默认 false = 仅追加缺失项） */
+    force?: boolean
 }
 
 // ==================== Git 管理器配置 ====================

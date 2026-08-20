@@ -9,14 +9,20 @@
  *   4. 后续调用 ensureToken() 自动取本地或触发授权
  *
  * 与 ssh.ts 的联动：拿到 token 后传给 setupSSH({ token })，
- * ssh.ts 会自动 POST 公钥到 /api/v4/user/keys，无需到页面手动添加。
+ * ssh.ts 会自动 POST 公钥到 /api/v3/user/keys。
+ *
+ * ⚠️ 已知限制：工蜂公共 OAuth client 的 scope 仅覆盖项目级 API（如 MR），
+ * 不含用户级 SSH key 写权限（POST /user/keys 返回 401）。
+ * 因此自动上传 SSH key 需用 Personal Access Token（--token 传入），
+ * OAuth token 只能用于项目级操作（与 flowcli 一致）。
  */
 
 import { request } from 'node:https'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
+import { execSync, spawn } from 'node:child_process'
 import { readJson, writeJson, exists, removeFile } from '../helpers/file'
-import { execShell, isWindows, isMac, isLinux } from '../helpers/exec'
+import { isWindows, isMac, isLinux } from '../helpers/exec'
 import type { GitResult } from './types'
 
 // ==================== 常量 ====================
@@ -107,19 +113,58 @@ export async function clearToken(): Promise<void> {
 
 /**
  * 跨平台打开浏览器 URL
- * 失败时不抛异常，仅返回失败（用户可手动复制链接）
+ * 用 execSync 直接执行（比 execShell 更可靠，避免 shell 转义问题）
+ * 失败时返回 false（终端已打印手动链接，用户可手动打开）
  */
-async function openUrl(url: string): Promise<void> {
+export function openUrl(url: string): boolean {
     try {
         if (isWindows) {
-            await execShell(`start "" "${url}"`)
+            // cmd /c start "" "url" 是 Windows 打开默认浏览器最可靠的方式
+            execSync(`start "" "${url}"`, { shell: 'cmd.exe', stdio: 'ignore' })
         } else if (isMac) {
-            await execShell(`open "${url}"`)
+            execSync(`open "${url}"`, { stdio: 'ignore' })
         } else if (isLinux) {
-            await execShell(`xdg-open "${url}"`)
+            execSync(`xdg-open "${url}"`, { stdio: 'ignore' })
+        } else {
+            return false
         }
+        return true
     } catch {
-        // 打开失败不阻断流程
+        return false
+    }
+}
+
+/**
+ * 复制文本到系统剪贴板（用于授权验证码 / 公钥）
+ * 用 spawn 写入 stdin，避免 shell 转义和中文编码问题
+ * 失败时返回 false（终端已打印文本，用户可手动复制）
+ */
+export function copyToClipboard(text: string): boolean {
+    try {
+        if (isWindows) {
+            const child = spawn('clip', [], { stdio: ['pipe', 'ignore', 'ignore'] })
+            child.stdin.write(text)
+            child.stdin.end()
+            return true
+        }
+        if (isMac) {
+            const child = spawn('pbcopy', [], { stdio: ['pipe', 'ignore', 'ignore'] })
+            child.stdin.write(text)
+            child.stdin.end()
+            return true
+        }
+        if (isLinux) {
+            // 优先 xclip，回退 xsel
+            const child = spawn('xclip', ['-selection', 'clipboard'], {
+                stdio: ['pipe', 'ignore', 'ignore']
+            })
+            child.stdin.write(text)
+            child.stdin.end()
+            return true
+        }
+        return false
+    } catch {
+        return false
     }
 }
 
@@ -179,11 +224,23 @@ function postJSON(pathUrl: string, body: unknown): Promise<unknown> {
  */
 export async function oauthLogin(): Promise<string | null> {
     // 1. 获取设备码
-    const codeResp = (await postJSON('/oauth/device/code', {
-        client_id: CLIENT_ID
-    })) as DeviceCodeResponse
+    let codeResp: DeviceCodeResponse
+    try {
+        codeResp = (await postJSON('/oauth/device/code', {
+            client_id: CLIENT_ID,
+            scope: 'api'
+        })) as DeviceCodeResponse
+    } catch (error) {
+        console.error(
+            `❌ 获取设备码失败: ${error instanceof Error ? error.message : String(error)}`
+        )
+        return null
+    }
 
     if (!codeResp.device_code) {
+        console.error(
+            `❌ 获取设备码失败: ${codeResp.error_description || codeResp.error || '响应无 device_code'}`
+        )
         return null
     }
 
@@ -195,22 +252,70 @@ export async function oauthLogin(): Promise<string | null> {
         verification_uri = '/oauth/device'
     } = codeResp
 
-    // 2. 打开浏览器（用户手动点确认）
-    const authUrl = `https://${GIT_HOST}${verification_uri}?user_code=${user_code}`
-    await openUrl(authUrl)
+    if (!user_code) {
+        console.error('❌ 获取设备码失败: 响应缺少 user_code（验证码）')
+        return null
+    }
 
-    // 3. 轮询获取 token
+    // 2. 打印授权提示 + 复制验证码 + 自动打开浏览器
+    const authUrl = `https://${GIT_HOST}${verification_uri}?user_code=${user_code}`
+
+    // 复制验证码到剪贴板（用户点授权前自动就绪）
+    const copied = copyToClipboard(user_code)
+
+    // 自动打开浏览器（URL 已带 user_code，工蜂页面通常会自动填充）
+    const opened = openUrl(authUrl)
+
+    console.log('\n========== 需要授权 ==========')
+    console.log('已自动打开浏览器，验证码已复制到剪贴板')
+    if (copied) {
+        console.log(`  验证码: ${user_code}  ✅ 已复制，如页面未自动填充请 Ctrl+V 粘贴`)
+    } else {
+        console.log(`  验证码: ${user_code}  （剪贴板复制失败，请手动输入）`)
+    }
+    if (!opened) {
+        console.log(`  ⚠️ 浏览器自动打开失败，请手动打开链接：`)
+        console.log(`  链接:   ${authUrl}`)
+    }
+    console.log('===============================\n')
+
+    // 4. 轮询获取 token
+    return pollForToken(device_code, expires_in, interval)
+}
+
+/**
+ * 轮询换取 access_token
+ *
+ * @param deviceCode 设备码
+ * @param expiresIn 有效期（秒）
+ * @param interval 轮询间隔（秒）
+ * @returns access_token；失败返回 null
+ */
+async function pollForToken(
+    deviceCode: string,
+    expiresIn: number,
+    interval: number
+): Promise<string | null> {
     const start = Date.now()
-    while (Date.now() - start < expires_in * 1000) {
+    while (Date.now() - start < expiresIn * 1000) {
         await new Promise((r) => setTimeout(r, interval * 1000))
 
-        const tokenResp = (await postJSON('/oauth/device/token', {
-            client_id: CLIENT_ID,
-            device_code,
-            grant_type: 'urn:ietf:params:oauth:grant-type:device_code'
-        })) as TokenResponse
+        let tokenResp: TokenResponse
+        try {
+            tokenResp = (await postJSON('/oauth/device/token', {
+                client_id: CLIENT_ID,
+                device_code: deviceCode,
+                grant_type: 'urn:ietf:params:oauth:grant-type:device_code'
+            })) as TokenResponse
+        } catch (error) {
+            console.error(
+                `❌ 轮询 token 失败: ${error instanceof Error ? error.message : String(error)}`
+            )
+            return null
+        }
 
         if (tokenResp.access_token) {
+            console.log('✅ 授权成功')
             await saveToken(tokenResp.access_token)
             return tokenResp.access_token
         }
@@ -218,8 +323,14 @@ export async function oauthLogin(): Promise<string | null> {
         if (tokenResp.error === 'authorization_pending' || tokenResp.error === 'slow_down') {
             continue
         }
+
+        console.error(
+            `❌ 授权失败: ${tokenResp.error_description || tokenResp.error || '未知错误'}`
+        )
         return null
     }
+
+    console.error('⏱️ 授权超时，未在有效期内完成授权')
     return null
 }
 

@@ -21,7 +21,7 @@ import {
 } from 'node:fs'
 import { homedir, platform, hostname, userInfo } from 'node:os'
 import { join } from 'node:path'
-import { ensureToken } from './auth'
+import { ensureToken, openUrl, copyToClipboard } from './auth'
 import { uploadKey as uploadKeyRemote } from './ssh-remote'
 import type {
     SSHSetupOptions,
@@ -65,7 +65,7 @@ const PLATFORM_CONFIGS: Record<
         host: 'git.woa.com',
         user: 'git',
         port: 22,
-        addKeyUrl: 'https://git.woa.com/-/profile/keys'
+        addKeyUrl: 'https://git.woa.com/profile/keys'
     }
 }
 
@@ -291,15 +291,29 @@ export class SSHManager {
         return { ok: true, keyPath: ctx.keyPath, pubKey }
     }
 
-    /** 尝试上传公钥（跳过则返回 null） */
+    /**
+     * 尝试上传公钥（跳过则返回 null）
+     *
+     * 兼容两种 token 方式：
+     *   - 传了 --token（个人私有 token / PAT）→ 走 PRIVATE-TOKEN header，不触发 OAuth 授权
+     *   - 没传 → 检测本地缓存，有则用（OAuth access_token，走 query 参数），无则触发 OAuth 授权
+     */
     private async tryUploadKey(
         options: SSHSetupOptions,
         pubKey: string,
         skipUpload: boolean
     ): Promise<UploadKeyResult | null> {
         if (skipUpload) return null
-        const token = options.token || (await ensureToken())
-        return token ? uploadKeyRemote(pubKey, token) : null
+
+        // 方式二：显式传入 PAT → pat 认证，不需要自动授权
+        if (options.token) {
+            return uploadKeyRemote(pubKey, options.token, undefined, 'pat')
+        }
+
+        // 方式一：OAuth 自动授权（检测缓存，无则触发授权）
+        const token = await ensureToken()
+        if (!token) return null
+        return uploadKeyRemote(pubKey, token, undefined, 'oauth')
     }
 
     /** 构建 setup 成功结果 */
@@ -313,6 +327,11 @@ export class SSHManager {
         const pubKey = keyResult.pubKey || ''
         const uploaded = uploadResult?.success === true
         const alreadyExists = uploadResult?.alreadyExists === true
+
+        // 上传失败时兜底：自动打开添加页面 + 复制公钥到剪贴板，用户只需粘贴保存
+        if (!uploaded && !alreadyExists && !ctx.skipUpload && ctx.platConf?.addKeyUrl && pubKey) {
+            this.guideManualAdd(ctx.platConf.addKeyUrl, pubKey)
+        }
 
         const nextSteps = this.buildSetupNextSteps({
             host: ctx.host,
@@ -512,6 +531,28 @@ Host ${hostAlias}
             if (stderr.includes('Connection timed out')) return `连接超时 — 检查网络/端口 ${port}`
             return stderr.slice(0, 200) || '连接测试失败（请将公钥添加到平台）'
         }
+    }
+
+    /**
+     * 上传失败兜底：自动打开添加公钥页面 + 复制公钥到剪贴板
+     * 用户只需在页面上 Ctrl+V 粘贴公钥并点击保存
+     */
+    private guideManualAdd(addKeyUrl: string, pubKey: string): void {
+        const copied = copyToClipboard(pubKey)
+        const opened = openUrl(addKeyUrl)
+
+        console.log('\n========== 手动添加公钥 ==========')
+        if (opened) {
+            console.log('已自动打开添加公钥页面')
+        } else {
+            console.log(`请手动打开: ${addKeyUrl}`)
+        }
+        if (copied) {
+            console.log('公钥已复制到剪贴板，页面粘贴框按 Ctrl+V 即可')
+        } else {
+            console.log('（剪贴板复制失败，请手动复制下方公钥）')
+        }
+        console.log('==================================\n')
     }
 
     /**

@@ -30,29 +30,53 @@ const API_BASE = '/api/v3'
 /** 请求超时（毫秒） */
 const REQUEST_TIMEOUT = 15000
 
+// ==================== 认证类型 ====================
+
+/**
+ * Token 认证类型（两种方式必须区分，认证传递方式不同）
+ *
+ * - oauth：OAuth device flow 获取的 access_token
+ *           必须通过 URL query 参数 `?access_token=` 传递（flowcli 实测）
+ * - pat：  个人私有 token（Personal Access Token，--token 传入）
+ *           通过 `PRIVATE-TOKEN` header 传递（GitLab 标准）
+ */
+export type AuthType = 'oauth' | 'pat'
+
 // ==================== HTTP 工具 ====================
 
 /**
- * 封装 HTTPS 请求（统一 PRIVATE-TOKEN 头）
+ * 封装 HTTPS 请求（区分 oauth / pat 两种认证方式）
  *
  * @param method HTTP 方法
  * @param pathUrl API 路径（如 /api/v3/user/keys）
- * @param token PRIVATE-TOKEN
- * @param body 请求体（POST/PUT 时传）
+ * @param token access_token 或 PRIVATE-TOKEN
+ * @param authType 认证类型：oauth（query 参数）/ pat（header）
+ * @param body 请求体（POST 时传）
  * @returns { statusCode, body }；网络错误时 reject
  */
 function httpRequest(
     method: 'GET' | 'POST' | 'DELETE',
     pathUrl: string,
     token: string,
+    authType: AuthType,
     body?: unknown
 ): Promise<{ statusCode: number; body: string }> {
     return new Promise((resolve, reject) => {
         const data = body ? JSON.stringify(body) : null
-        const headers: Record<string, string | number> = {
-            'PRIVATE-TOKEN': token,
-            Accept: 'application/json'
+
+        // 根据认证类型决定 token 传递方式
+        let path = pathUrl
+        const headers: Record<string, string | number> = { Accept: 'application/json' }
+
+        if (authType === 'oauth') {
+            // OAuth access_token → URL query 参数（工蜂只认这个）
+            const sep = pathUrl.includes('?') ? '&' : '?'
+            path = `${pathUrl}${sep}access_token=${encodeURIComponent(token)}`
+        } else {
+            // PAT → PRIVATE-TOKEN header
+            headers['PRIVATE-TOKEN'] = token
         }
+
         if (data) {
             headers['Content-Type'] = 'application/json'
             headers['Content-Length'] = Buffer.byteLength(data)
@@ -62,7 +86,7 @@ function httpRequest(
             {
                 hostname: GIT_HOST,
                 port: 443,
-                path: pathUrl,
+                path,
                 method,
                 headers,
                 timeout: REQUEST_TIMEOUT
@@ -108,13 +132,15 @@ function parseBody(body: string): unknown {
  * 处理 400 错误（fingerprint 已存在）。
  *
  * @param pubKey 公钥内容（含 ssh-ed25519 前缀）
- * @param token PRIVATE-TOKEN
+ * @param token access_token（oauth）或 PRIVATE-TOKEN（pat）
  * @param title 可选自定义标题；默认 {hostname}-{timestamp}
+ * @param authType 认证类型：oauth（query 参数）/ pat（header）
  */
 export async function uploadKey(
     pubKey: string,
     token: string,
-    title?: string
+    title?: string,
+    authType: AuthType = 'oauth'
 ): Promise<UploadKeyResult> {
     if (!token) {
         return { success: false, alreadyExists: false, error: '未提供 token' }
@@ -123,10 +149,16 @@ export async function uploadKey(
     const keyTitle = title || `${hostname()}-${Date.now()}`
 
     try {
-        const { statusCode, body } = await httpRequest('POST', `${API_BASE}/user/keys`, token, {
-            title: keyTitle,
-            key: pubKey
-        })
+        const { statusCode, body } = await httpRequest(
+            'POST',
+            `${API_BASE}/user/keys`,
+            token,
+            authType,
+            {
+                title: keyTitle,
+                key: pubKey
+            }
+        )
 
         return resolveUploadResult(statusCode, body)
     } catch (error) {
@@ -149,7 +181,19 @@ function resolveUploadResult(statusCode: number, body: string): UploadKeyResult 
     }
 
     if (statusCode === 401) {
-        return { success: false, alreadyExists: false, error: 'Token 无效或已过期' }
+        return {
+            success: false,
+            alreadyExists: false,
+            error: `Token 无效或已过期（HTTP 401）${body ? `: ${body.slice(0, 200)}` : ''}`
+        }
+    }
+
+    if (statusCode === 403) {
+        return {
+            success: false,
+            alreadyExists: false,
+            error: `权限不足（HTTP 403，可能是 OAuth scope 不含 api）${body ? `: ${body.slice(0, 200)}` : ''}`
+        }
     }
 
     return {
@@ -185,14 +229,18 @@ function parse400Response(body: string): UploadKeyResult {
  * 调用 GET /api/v3/user/keys。
  *
  * @param token PRIVATE-TOKEN；不传则自动读本地缓存
+ * @param authType 认证类型；默认 oauth（缓存的是 OAuth access_token）
  * @returns Key 列表（id/title/key/createdAt）
  */
-export async function listKeys(token?: string): Promise<SSHKeyInfo[]> {
+export async function listKeys(
+    token?: string,
+    authType: AuthType = 'oauth'
+): Promise<SSHKeyInfo[]> {
     const tk = token || (await getToken())
     if (!tk) return []
 
     try {
-        const { statusCode, body } = await httpRequest('GET', `${API_BASE}/user/keys`, tk)
+        const { statusCode, body } = await httpRequest('GET', `${API_BASE}/user/keys`, tk, authType)
         if (statusCode !== 200) return []
 
         const list = parseBody(body) as Array<Record<string, unknown>>
@@ -216,14 +264,24 @@ export async function listKeys(token?: string): Promise<SSHKeyInfo[]> {
  *
  * @param id Key ID
  * @param token PRIVATE-TOKEN；不传则自动读本地缓存
+ * @param authType 认证类型；默认 oauth（缓存的是 OAuth access_token）
  * @returns 是否删除成功
  */
-export async function deleteKey(id: number, token?: string): Promise<boolean> {
+export async function deleteKey(
+    id: number,
+    token?: string,
+    authType: AuthType = 'oauth'
+): Promise<boolean> {
     const tk = token || (await getToken())
     if (!tk) return false
 
     try {
-        const { statusCode } = await httpRequest('DELETE', `${API_BASE}/user/keys/${id}`, tk)
+        const { statusCode } = await httpRequest(
+            'DELETE',
+            `${API_BASE}/user/keys/${id}`,
+            tk,
+            authType
+        )
         // 200 成功；404 视为已删除（幂等）
         return statusCode === 200 || statusCode === 204 || statusCode === 404
     } catch {
@@ -237,16 +295,20 @@ export async function deleteKey(id: number, token?: string): Promise<boolean> {
  * 调用 GET /api/v3/user。
  *
  * @param token PRIVATE-TOKEN；不传则自动读本地缓存
+ * @param authType 认证类型；默认 oauth（缓存的是 OAuth access_token）
  * @returns 验证结果（含用户名/全名/ID）
  */
-export async function verifyToken(token?: string): Promise<VerifyTokenResult> {
+export async function verifyToken(
+    token?: string,
+    authType: AuthType = 'oauth'
+): Promise<VerifyTokenResult> {
     const tk = token || (await getToken())
     if (!tk) {
         return { valid: false, error: '未找到本地 token，请先 git.login() 授权' }
     }
 
     try {
-        const { statusCode, body } = await httpRequest('GET', `${API_BASE}/user`, tk)
+        const { statusCode, body } = await httpRequest('GET', `${API_BASE}/user`, tk, authType)
 
         if (statusCode === 200) {
             const user = parseBody(body) as {
@@ -291,23 +353,28 @@ export class SshRemoteService {
      * @param token PRIVATE-TOKEN（必填，通常由 ensureToken 获取）
      * @param title 可选标题
      */
-    async uploadKey(pubKey: string, token: string, title?: string): Promise<UploadKeyResult> {
-        return uploadKey(pubKey, token, title)
+    async uploadKey(
+        pubKey: string,
+        token: string,
+        title?: string,
+        authType: AuthType = 'oauth'
+    ): Promise<UploadKeyResult> {
+        return uploadKey(pubKey, token, title, authType)
     }
 
     /** 查询已注册的 Key 列表 */
-    async listKeys(): Promise<SSHKeyInfo[]> {
-        return listKeys()
+    async listKeys(authType: AuthType = 'oauth'): Promise<SSHKeyInfo[]> {
+        return listKeys(undefined, authType)
     }
 
     /** 删除指定 Key */
-    async deleteKey(id: number): Promise<boolean> {
-        return deleteKey(id)
+    async deleteKey(id: number, authType: AuthType = 'oauth'): Promise<boolean> {
+        return deleteKey(id, undefined, authType)
     }
 
     /** 验证当前 token 是否有效 */
-    async verifyToken(): Promise<VerifyTokenResult> {
-        return verifyToken()
+    async verifyToken(authType: AuthType = 'oauth'): Promise<VerifyTokenResult> {
+        return verifyToken(undefined, authType)
     }
 }
 

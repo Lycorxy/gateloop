@@ -1,0 +1,224 @@
+{
+  "version": "1.0.0",
+  "source": "2187:139044",
+  "containers": [
+    {
+      "containerId": "2187:139044",
+      "containerName": "",
+      "paddingTop": 0,
+      "paddingBottom": 390,
+      "paddingLeft": 0,
+      "paddingRight": 623,
+      "border": {
+        "top": 0,
+        "right": 0,
+        "bottom": 0,
+        "left": 0
+      },
+      "firstChildId": "2187:139998",
+      "lastChildId": "2187:140117",
+      "effectiveHeight": 980,
+      "effectiveWidth": 1432
+    },
+    {
+      "containerId": "2187:139998",
+      "containerName": "配置标题栏",
+      "paddingTop": 20,
+      "paddingBottom": 22,
+      "paddingLeft": 20,
+      "paddingRight": 20,
+      "border": {
+        "top": 0,
+        "right": 0,
+        "bottom": 1,
+        "left": 0,
+        "boxSizing": "border-box"
+      },
+      "firstChildId": "I2187:139998;4446:32790",
+      "lastChildId": "I2187:139998;4076:29518",
+      "effectiveHeight": 64,
+      "effectiveWidth": 1432
+    },
+    {
+      "containerId": "I2187:139998;4446:32790",
+      "containerName": "title/页面大标题",
+      "paddingTop": 0,
+      "paddingBottom": 24,
+      "paddingLeft": 0,
+      "paddingRight": 1172,
+      "border": {
+        "top": 0,
+        "right": 0,
+        "bottom": 0,
+        "left": 0
+      },
+      "firstChildId": "I2187:139998;4446:32790;2520:35115",
+      "lastChildId": "I2187:139998;4446:32790;2520:35115",
+      "effectiveHeight": 24,
+      "effectiveWidth": 1244
+    },
+    {
+      "containerId": "I2187:139998;4076:29518",
+      "containerName": "操作按钮",
+      "paddingTop": 0,
+      "paddingBottom": 0,
+      "paddingLeft": 0,
+      "paddingRight": 0,
+      "border": {
+        "top": 0,
+        "right": 0,
+        "bottom": 0,
+        "left": 0
+      },
+      "firstChildId": "I2187:139998;4076:29518;3206:25059",
+      "lastChildId": "I2187:139998;4076:29518;3206:25060",
+      "effectiveHeight": 20,
+      "effectiveWidth": 116
+    },
+    {
+      "containerId": "I2187:139998;4076:29518;3206:25059",
+      "containerName": "Button",
+      "paddingTop": 0,
+      "paddingBottom": 1,
+      "paddingLeft": 0,
+      "paddingRight": 0,
+      "border": {
+        "top": 0,
+        "right": 0,
+        "bottom": 0,
+        "left": 0
+      },
+      "firstChildId": "I2187:139998;4076:29518;3206:25059;2283:57296",
+      "lastChildId": "I2187:139998;4076:29518;3206:25059;2283:57295",
+      "effectiveHeight": 20,
+      "effectiveWidth": 50
+    },
+    {
+      "containerId": "I2187:139998;4076:29518;3206:25059;2283:57295",
+      "containerName": "line_pen #img=line_pen",
+      "paddingTop": 1.23,
+      "paddingBottom": 1.35,
+      "paddingLeft": 2.7,
+      "paddingRight": 2.18,
+      "border": {
+        "top": 0,
+        "right": 0,
+        "bottom": 0,
+        "left": 0
+      },
+      "firstChildId": "I2187:139998;4076:29518;3206:25059;2283:57295;2301:76516",
+      "lastChildId": "I2187:139998;4076:29518;3206:25059;2283:57295;2301:76516",
+      "effectiveHeight": 18,
+      "effectiveWidth": 18
+    },
+    {
+      "containerId": "I2187:139998;4076:29518;3206:25060",
+      "containerName": "Button",
+      "paddingTop": 0,
+      "paddingBottom": 1,
+      "paddingLeft": 0,
+      "paddingRight": 0,
+      "border": {
+        "top": 0,
+        "right": 0,
+        "bottom": 0,
+        "left": 0
+      },
+      "firstChildId": "I2187:139998;4076:29518;3206:25060;2283:57296",
+      "lastChildId": "I2187:139998;4076:29518;3206:25060;2283:57295",
+      "effectiveHeight": 20,
+      "effectiveWidth": 50
+    },
+    {
+      "containerId": "I2187:139998;4076:29518;3206:25060;2283:57295",
+      "containerName": "line_history #img=line_history",
+      "paddingTop": 1.57,
+      "paddingBottom": 1.58,
+      "paddingLeft": 1.58,
+      "paddingRight": 1.57,
+      "border": {
+        "top": 0,
+        "right": 0,
+        "bottom": 0,
+        "left": 0
+      },
+      "firstChildId": "I2187:139998;4076:29518;3206:25060;2283:57295;2425:4042",
+      "lastChildId": "I2187:139998;4076:29518;3206:25060;2283:57295;2425:4042",
+      "effectiveHeight": 18,
+      "effectiveWidth": 18
+    },
+    {
+      "containerId": "2187:140117",
+      "containerName": "Empty-illustration",
+      "paddingTop": 0,
+      "paddingBottom": 0,
+      "paddingLeft": 0,
+      "paddingRight": 33,
+      "border": {
+        "top": 0,
+        "right": 0,
+        "bottom": 0,
+        "left": 0
+      },
+      "firstChildId": "I2187:140117;4011:75400",
+      "lastChildId": "I2187:140117;1014:33161",
+      "effectiveHeight": 200,
+      "effectiveWidth": 186
+    },
+    {
+      "containerId": "I2187:140117;1014:33161",
+      "containerName": "text",
+      "paddingTop": 0,
+      "paddingBottom": 0,
+      "paddingLeft": 0,
+      "paddingRight": 33,
+      "border": {
+        "top": 0,
+        "right": 0,
+        "bottom": 0,
+        "left": 0
+      },
+      "firstChildId": "I2187:140117;1014:33162",
+      "lastChildId": "I2187:140117;4011:76564",
+      "effectiveHeight": 76,
+      "effectiveWidth": 186
+    },
+    {
+      "containerId": "I2187:140117;1014:33162",
+      "containerName": "description",
+      "paddingTop": 0,
+      "paddingBottom": 20,
+      "paddingLeft": 0,
+      "paddingRight": 0,
+      "border": {
+        "top": 0,
+        "right": 0,
+        "bottom": 0,
+        "left": 0
+      },
+      "firstChildId": "I2187:140117;1014:33163",
+      "lastChildId": "I2187:140117;1014:33163",
+      "effectiveHeight": 20,
+      "effectiveWidth": 186
+    },
+    {
+      "containerId": "I2187:140117;4011:76564",
+      "containerName": "Button",
+      "paddingTop": 10,
+      "paddingBottom": 30,
+      "paddingLeft": 32,
+      "paddingRight": 32,
+      "border": {
+        "top": 0,
+        "right": 0,
+        "bottom": 0,
+        "left": 0
+      },
+      "firstChildId": "I2187:140117;4011:76564;2283:57248",
+      "lastChildId": "I2187:140117;4011:76564;2283:57248",
+      "effectiveHeight": 40,
+      "effectiveWidth": 120
+    }
+  ],
+  "siblings": []
+}

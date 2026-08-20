@@ -57,6 +57,11 @@ export class SnapshotManager {
         this.store = this.createEmptyStore()
     }
 
+    /** 返回快照存储目录（可用于放置行为日志等附属文件） */
+    getSnapshotDir(): string {
+        return this.snapDir
+    }
+
     /**
      * 初始化快照管理器
      */

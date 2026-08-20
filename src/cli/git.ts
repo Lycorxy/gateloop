@@ -13,9 +13,12 @@
  *   nut git log                 - 查看提交日志
  *   nut git snapshots           - 查看快照列表
  *   nut git snapshot -d "备份"   - 创建快照
+ *   nut git activity            - 查看操作行为日志（每次关键动作）
+ *   nut git undo                - 撤销上一步操作
  *   nut git rollback --to 0     - 回退到指定快照
  *   nut git rollback --prev     - 回退到上一个快照
  *   nut git rollback --first    - 回退到第一个快照
+ *   nut git rollback --action 5 - 回退到第 5 步操作前的状态
  *   nut git diff                - 查看工作区差异
  *   nut git diff --staged       - 查看暂存区差异
  *   nut git diff-file <path>    - 查看文件差异
@@ -35,6 +38,7 @@
  */
 
 import { GitManager } from '../git/index'
+import { getNextVersion, getTagName } from '../git/branch'
 import type { GitResult, SSHSetupOptions, SSHAccount } from '../git/types'
 
 // ==================== 辅助函数 ====================
@@ -129,9 +133,12 @@ function printHelp(): void {
 ⏪ 回退与快照:
   nut git snapshots           列出所有快照
   nut git snapshot -d <描述>  创建手动快照
+  nut git activity           查看操作行为日志（做了什么、能否回退）
+  nut git undo               撤销上一步操作（回退到上一步前的快照）
   nut git rollback --to <索引>  回退到指定快照
   nut git rollback --prev     回退到上一个快照
   nut git rollback --first    回退到第一个快照
+  nut git rollback --action <序号|ID>  回退到指定操作步骤前的状态
   nut git revert <文件>       还原单个文件
 
 🔍 差异与历史:
@@ -168,6 +175,25 @@ function printHelp(): void {
   nut git ssh troubleshoot                 诊断 SSH 问题
   nut git ssh status                        查看 SSH 状态
   nut git ssh key [host]                    查看公钥
+
+🚀 分支策略（feature/hotfix + tag + MR）:
+  nut git flow create --type feature [--version <x.y.z>] [--tag] [--mr] [--desc <描述>]
+                                            创建需求分支 feature/v{ver}
+  nut git flow create --type hotfix [--version <x.y.z>] [--tag] [--mr] [--desc <描述>]
+                                            创建缺陷修复分支 hotfix/v{ver}
+  nut git flow tag [--version <x.y.z>] [--message <说明>]
+                                            打 tag v{ver} 并推送
+  nut git flow mr [--source <分支>] [--target <分支>] [--title <标题>]
+                                            创建 MR（默认当前分支 → master）
+  nut git flow merge [--source <分支>]       合并分支到 test 并推送（默认当前分支）
+  nut git flow preview [--source <分支>]     预览合并到 test（无冲突自动合并，有冲突提示手动）
+  nut git flow delete [--branch <分支>]      删除分支（仅 feature/hotfix，受保护分支禁止）
+  nut git rebase [--onto master] [--branch <分支>]
+                                            将分支 rebase 到目标分支（默认 master）
+  nut git config init [--force] [--crlf]     生成/完善项目 Git 配置
+  nut git config gitignore                  仅生成/完善 .gitignore
+  nut git config editorconfig [--crlf]       仅生成/完善 .editorconfig
+  nut git flow list                         列出可管理分支 + tags
 
 示例:
   nut git stage --all
@@ -453,6 +479,38 @@ export async function runGit(argv: string[]): Promise<void> {
                 break
             }
 
+            // ==================== 操作行为日志 ====================
+            case 'activity':
+            case 'oplog': {
+                const records = git.listActivity()
+                printSeparator(`操作行为日志 (共 ${records.length} 条)`)
+                if (records.length === 0) {
+                    console.log('  暂无记录')
+                }
+                for (const r of records) {
+                    const time = new Date(r.timestamp).toLocaleString()
+                    const status = r.result === 'success' ? '\x1b[32m✓\x1b[0m' : '\x1b[31m✗\x1b[0m'
+                    const snap = r.snapshotId
+                        ? `\x1b[90m[快照 ${r.snapshotId}]\x1b[0m`
+                        : '\x1b[90m[无快照]\x1b[0m'
+                    console.log(`  #${r.seq} ${status} \x1b[36m${r.action}\x1b[0m ${snap}`)
+                    console.log(`     ${r.description}`)
+                    console.log(`     分支: ${r.branch ?? '-'} | 时间: ${time}`)
+                    if (r.error) console.log(`     \x1b[31m失败原因: ${r.error}\x1b[0m`)
+                }
+                console.log(
+                    '\n使用 nut git undo 撤销上一步，或 nut git rollback --action <序号> 回退到指定步骤'
+                )
+                break
+            }
+
+            case 'undo': {
+                const result = await git.undo()
+                if (result.success) printSuccess(result.message)
+                else printError(result.message)
+                break
+            }
+
             // ==================== 回退 ====================
             case 'rollback':
             case 'restore': {
@@ -462,6 +520,10 @@ export async function runGit(argv: string[]): Promise<void> {
                     else printError(result.message)
                 } else if (flags.first) {
                     const result = await git.restoreToFirst()
+                    if (result.success) printSuccess(result.message)
+                    else printError(result.message)
+                } else if (flags.action !== undefined) {
+                    const result = await git.rollbackToAction(String(flags.action))
                     if (result.success) printSuccess(result.message)
                     else printError(result.message)
                 } else if (flags.to !== undefined) {
@@ -640,6 +702,26 @@ export async function runGit(argv: string[]): Promise<void> {
                 break
             }
 
+            // ==================== Rebase ====================
+            case 'rebase': {
+                const onto = flags.onto ? String(flags.onto) : 'master'
+                const branch = flags.branch ? String(flags.branch) : undefined
+                printSeparator(`Rebase ${branch || '(当前分支)'} → ${onto}`)
+                const result = await git.rebase({ branch, onto })
+                if (result.success) {
+                    printSuccess(result.message)
+                } else {
+                    printError(result.message)
+                    if (result.error) console.error(`  原因: ${result.error}`)
+                    if (!result.success) {
+                        console.log(
+                            '  冲突时请手动: git rebase --continue（解决后） 或 git rebase --abort（放弃）'
+                        )
+                    }
+                }
+                break
+            }
+
             // ==================== Stash ====================
             case 'stash': {
                 const desc = args[0]
@@ -714,6 +796,194 @@ export async function runGit(argv: string[]): Promise<void> {
                 break
             }
 
+            // ==================== 项目 Git 配置生成 ====================
+            case 'config': {
+                if (subcommand === 'init' || !subcommand) {
+                    const lineEnding = flags.crlf ? 'crlf' : 'lf'
+                    const force = Boolean(flags.force)
+                    printSeparator(
+                        `生成项目 Git 配置 (${lineEnding.toUpperCase()}${force ? '，覆盖重写' : '，仅补充缺失项'})`
+                    )
+                    const result = await git.setupProjectConfig({ lineEnding, force })
+                    if (result.success) {
+                        printSuccess(result.message)
+                    } else {
+                        printError(result.message)
+                    }
+                } else if (subcommand === 'gitignore') {
+                    const result = await git.setupGitIgnore({ force: Boolean(flags.force) })
+                    if (result.success) printSuccess(result.message)
+                    else printError(result.message)
+                } else if (subcommand === 'editorconfig') {
+                    const lineEnding = flags.crlf ? 'crlf' : 'lf'
+                    const result = await git.setupEditorConfig({
+                        lineEnding,
+                        force: Boolean(flags.force)
+                    })
+                    if (result.success) printSuccess(result.message)
+                    else printError(result.message)
+                } else {
+                    printError(`未知 config 子命令: ${subcommand}`)
+                    console.log('可用子命令: init, gitignore, editorconfig')
+                }
+                break
+            }
+
+            // ==================== 分支策略（feature/hotfix + tag + MR） ====================
+            case 'flow': {
+                const projectKey = git.detectProjectKey()
+
+                if (subcommand === 'create' || !subcommand) {
+                    // 创建 feature / hotfix 分支（可选 --tag / --mr）
+                    const type = flags.type ? String(flags.type) : 'feature'
+                    if (type !== 'feature' && type !== 'hotfix') {
+                        printError(`--type 只能是 feature 或 hotfix，当前: ${type}`)
+                        process.exit(1)
+                    }
+
+                    // 版本号：未提供则自动计算（远程最新版本 patch+1）
+                    let version = flags.version ? String(flags.version) : ''
+                    if (!version) {
+                        const latest = await git.getLatestVersion(projectKey)
+                        version = getNextVersion(latest, 'patch')
+                    }
+
+                    printSeparator(`创建 ${type} 分支`)
+                    const branchName = await git.createBranchByType(type, version, projectKey)
+                    if (!branchName) {
+                        printError('分支创建失败')
+                        process.exit(1)
+                    }
+                    printSuccess(`分支创建成功: ${branchName}`)
+
+                    // 打 tag（可选）
+                    if (flags.tag) {
+                        const tagName = getTagName(version, projectKey)
+                        const ok = await git.createTag(tagName)
+                        if (ok) printSuccess(`tag 创建成功: ${tagName}`)
+                        else printError(`tag 创建失败: ${tagName}`)
+                    }
+
+                    // 创建 MR（可选）
+                    if (flags.mr) {
+                        const desc = flags.desc ? String(flags.desc) : ''
+                        const title =
+                            flags.title ||
+                            `${type === 'feature' ? 'feat' : 'fix'}${desc ? `: ${desc}` : ''} (${branchName})`
+                        const result = await git.createMR({
+                            sourceBranch: branchName,
+                            targetBranch: flags.target ? String(flags.target) : 'master',
+                            title: String(title)
+                        })
+                        if (result.success) printSuccess(`MR 创建成功: ${result.url}`)
+                        else printError(`MR 创建失败: ${result.error}`)
+                    }
+                } else if (subcommand === 'tag') {
+                    // 打 tag
+                    let version = flags.version ? String(flags.version) : ''
+                    if (!version) {
+                        const info = await git.getCurrentProjectInfo()
+                        version = info?.version || '0.0.0'
+                    }
+                    const tagName = getTagName(version, projectKey)
+                    const ok = await git.createTag(
+                        tagName,
+                        flags.message ? String(flags.message) : undefined
+                    )
+                    if (ok) printSuccess(`tag 创建成功: ${tagName}`)
+                    else printError(`tag 创建失败: ${tagName}`)
+                } else if (subcommand === 'mr') {
+                    // 创建 MR
+                    const source = flags.source
+                        ? String(flags.source)
+                        : await git.getCurrentBranch()
+                    const target = flags.target ? String(flags.target) : 'master'
+                    const title = flags.title ? String(flags.title) : `MR: ${source} -> ${target}`
+                    const result = await git.createMR({
+                        sourceBranch: source,
+                        targetBranch: target,
+                        title
+                    })
+                    if (result.success) printSuccess(`MR 创建成功: ${result.url}`)
+                    else printError(`MR 创建失败: ${result.error}`)
+                } else if (subcommand === 'merge') {
+                    // 合并分支到 test 测试分支并推送
+                    const source = flags.source
+                        ? String(flags.source)
+                        : await git.getCurrentBranch()
+                    printSeparator(`合并 ${source} → test`)
+                    const result = await git.mergeToTest(source)
+                    if (result.success) {
+                        printSuccess(`已合并 ${source} 到 ${result.testBranch} 并推送`)
+                    } else {
+                        printError(`合并失败: ${result.error}`)
+                    }
+                } else if (subcommand === 'preview') {
+                    // 预览合并到 test：无冲突自动合并，有冲突提示手动
+                    const source = flags.source
+                        ? String(flags.source)
+                        : await git.getCurrentBranch()
+                    printSeparator(`预览合并 ${source} → test`)
+                    const result = await git.previewMergeToTest(source)
+                    if (result.success) {
+                        printSuccess(`无冲突，已自动合并 ${source} 到 ${result.testBranch} 并推送`)
+                    } else if (result.conflict) {
+                        printError(`检测到冲突，已中止自动合并`)
+                        if (result.error) console.error(`  ${result.error}`)
+                        console.log(
+                            `  请手动合并: git checkout ${result.testBranch} && git merge ${source} → 解决冲突 → git push origin ${result.testBranch}`
+                        )
+                    } else {
+                        printError(`预览失败: ${result.error}`)
+                    }
+                } else if (subcommand === 'delete') {
+                    // 安全删除分支（仅 feature/hotfix）
+                    const branchName = flags.branch
+                        ? String(flags.branch)
+                        : flags.source
+                          ? String(flags.source)
+                          : await git.getCurrentBranch()
+                    printSeparator(`删除分支 ${branchName}`)
+                    const result = await git.deleteDeletableBranch(branchName)
+                    if (result.success) {
+                        printSuccess(`已删除分支: ${branchName}（远程 + 本地）`)
+                    } else if (result.reason === 'protected') {
+                        printError(result.error || '受保护分支禁止删除')
+                    } else {
+                        printError(`删除失败: ${result.error}`)
+                    }
+                } else if (subcommand === 'list') {
+                    // 列出分支 + tags
+                    const branches = await git.listManagedBranches(projectKey)
+                    printSeparator(`可管理分支 (${branches.length} 个)`)
+                    const typeIcon: Record<string, string> = {
+                        release: '🚀',
+                        feature: '✨',
+                        hotfix: '🐛'
+                    }
+                    for (const b of branches) {
+                        console.log(
+                            `  ${typeIcon[b.type] || '📌'} [${b.type}] ${b.name} (v${b.version})`
+                        )
+                    }
+
+                    const tags = await git.listTags(projectKey)
+                    if (tags.length > 0) {
+                        printSeparator(`Tags (${tags.length} 个)`)
+                        for (const t of tags.slice(0, 15)) {
+                            console.log(`  🏷️  ${t}`)
+                        }
+                        if (tags.length > 15) {
+                            console.log(`  ... 还有 ${tags.length - 15} 个`)
+                        }
+                    }
+                } else {
+                    printError(`未知 flow 子命令: ${subcommand}`)
+                    console.log('可用子命令: create, tag, mr, merge, preview, delete, list')
+                }
+                break
+            }
+
             // ==================== SSH ====================
             case 'ssh': {
                 if (subcommand === 'setup' || !subcommand) {
@@ -752,7 +1022,11 @@ export async function runGit(argv: string[]): Promise<void> {
                         printError(result.message)
                     }
                 } else if (subcommand === 'multi') {
-                    const platform = (flags.platform ? String(flags.platform) : 'gitcode') as 'github' | 'gitlab' | 'gitee' | 'gitcode'
+                    const platform = (flags.platform ? String(flags.platform) : 'gitcode') as
+                        | 'github'
+                        | 'gitlab'
+                        | 'gitee'
+                        | 'gitcode'
                     const accountsStr = flags.accounts ? String(flags.accounts) : ''
                     if (!accountsStr) {
                         printError('请提供 --accounts，格式: name:email,name:email')

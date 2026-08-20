@@ -1,0 +1,35 @@
+{
+  "name": "git-manager",
+  "description": "Git 操作全功能命令执行手册，覆盖暂存/提交/快照/回退/行为日志/差异/分支/rebase/stash/换行符/项目配置/分支策略flow/SSH",
+  "anchors": [
+    {
+      "id": "resolve",
+      "name": "意图解析",
+      "brief": "根据用户自然语言意图，匹配到精确的 npx nut git 命令 + 参数。参照 SKILL.md 命令速查表和 references/cli-reference.md 详细参数文档。输出 JSON 包含 command、subcommand、flags、args。",
+      "allowedTools": ["read_file", "search_content"],
+      "produces": [".specflow/context/git-command.json"],
+      "verify": {
+        "producesExist": true,
+        "schema": {
+          "required": ["command"],
+          "properties": {
+            "command": { "type": "string", "description": "npx nut git 子命令名" },
+            "subcommand": { "type": "string" },
+            "flags": { "type": "object" },
+            "args": { "type": "array" }
+          }
+        }
+      }
+    },
+    {
+      "id": "execute",
+      "name": "执行命令",
+      "brief": "执行解析出的 npx nut git 命令，展示输出，处理错误。破坏性操作先确认。执行后告知用户可用 undo/rollback 回退。",
+      "allowedTools": ["execute_command"],
+      "consumes": ["git-command"],
+      "verify": {
+        "custom": "git rev-parse --is-inside-work-tree 2>nul"
+      }
+    }
+  ]
+}
