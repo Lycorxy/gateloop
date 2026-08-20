@@ -330,7 +330,12 @@ export class GitManager {
         })
 
         // 把快照 ID 顺带给调用方（如 GitResult.snapshotId），方便上层展示
-        if (snapshotId) {
+        return this.attachSnapshotId(result, snapshotId)
+    }
+
+    /** 仅当 result 为非空对象时挂载快照 ID，避免对字符串/原始值返回值抛 TypeError */
+    private attachSnapshotId<T>(result: T, snapshotId?: string): T {
+        if (snapshotId && result && typeof result === 'object') {
             ;(result as { snapshotId?: string }).snapshotId = snapshotId
         }
         return result

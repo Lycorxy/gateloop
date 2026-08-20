@@ -691,7 +691,7 @@ export async function runGit(argv: string[]): Promise<void> {
 
             case 'checkout':
             case 'switch': {
-                const name = args[0]
+                const name = subcommand || args[0]
                 if (!name) {
                     printError('请提供分支名')
                     process.exit(1)
