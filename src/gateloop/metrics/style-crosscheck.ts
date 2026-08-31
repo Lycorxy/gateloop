@@ -1,3 +1,5 @@
+/* eslint-disable complexity */
+
 /**
  * style-crosscheck — SCSS ↔ TSX 类名一致性校验
  *
@@ -8,7 +10,7 @@
  *
  * 替代 css-style-writer Step 6.5 的模型自评（自评容易放水）。
  *
- * 用法：nut ads metric style-crosscheck --dir src/
+ * 用法：nut gateloop metric style-crosscheck --dir src/
  *   exit 0 = 一致
  *   exit 1 = 有不一致（附具体清单）
  */

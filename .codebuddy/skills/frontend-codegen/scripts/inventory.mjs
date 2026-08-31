@@ -3,7 +3,7 @@
  * inventory.mjs — 系统性文件清单（客观输入先行）
  *
  * 扫描指定目录的源文件，按类型判定行数违规，产出机器可验证的 inventory.json。
- * 由 ADS verify.produceScripts 调用，模型不参与判断。
+ * 由 GateLoop verify.produceScripts 调用，模型不参与判断。
  *
  * 用法：
  *   node inventory.mjs --output .specflow/context/inventory.json [--root src] [--ext .ts,.tsx]

@@ -4,9 +4,20 @@
 >
 > **v2 新增**：主观可归类维度不再"模型自评放水"——走 `review.model` 结构化评审（四道门禁：完整性/script重跑防伪/evidence/阻断），把"自评"升级为"填一张跑不掉的表"。
 
+## 入口：用户检测清单（两条路径）
+
+任何 skill（新建或改造）的质量要求入口都是**用户提供的检测清单**——逐条走下面的判定流程，分流到两条路径：
+
+| 路径 | 适用 | 落地 | 准确性 |
+|---|---|---|---|
+| **路径1 脚本** | 清单项是固定可执行的脚本/CLI/接口命令 | `verify.custom` / `produceScripts`（exit 0 = pass）；需模型声明结论的用 `review.mode:'script'`（引擎重跑 command 核对） | **100%**（exit code，模型改不了） |
+| **路径2 模型** | 清单项需要模型理解（写不出判定脚本） | `review.checklist`（`mode:'model'`）——模型一次过一遍，按清单逐条核对，每条 verdict+evidence | 形式由四道门禁保证（漏评/空话/造假/fail放行 均 FAIL） |
+
+**路径1 优先**：凡是能写成固定脚本的检测，一律固化到 `scripts/` CLI 进 verify，绝不留给模型口述。**路径2 兜底**：写不出脚本的才交给模型，且必须逐条核对留痕。
+
 ## 判定流程
 
-拿到任何一条质量要求，问 5 个问题：
+拿到检测清单的任何一条，问 5 个问题：
 
 ```
 Q1: 违反了是否有唯一对错？
@@ -149,6 +160,7 @@ Q4: 是否有可归类的质量维度（能列 checklist 逐条评）？
 - frontend-codegen design anchor：6 项 model（设计决策质量）
 - web-ui-design：6 项 model（需求/功能/布局/交互/信息层级/容错）
 - code-quality-guard：**不配 review**（全是类型 A 收敛型，无主观维度）
+- figma-dom-style：6 项 model（还原保真度：尺寸/间距/颜色/字体/边框/对齐），reduce anchor 的 review 门禁
 
 ### 类型 E — 纯审美（完全交给模型，不进 verify）
 
@@ -205,8 +217,8 @@ Q1: 否 → Q2: 否 → Q3: 否 → Q4: 否（写不出评审标准）→ 类型
 
   // 类型 A — 收敛型 custom（自定义脚本）
   "custom": [
-    "npx nut ads metric style-crosscheck --dir src/",
-    "npx nut ads metric subtask-derivation --plan .specflow/context/current.json --state .specflow/anchor-state.json"
+    "npx nut gateloop metric style-crosscheck --dir src/",
+    "npx nut gateloop metric architecture --input .specflow/context/current.json --state .specflow/anchor-state.json"
   ],
 
   // 类型 B — 完备性 schema 字段（不校验内容）

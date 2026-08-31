@@ -1,5 +1,5 @@
 /**
- * ADS 验证器 — 通过与否由 exit code 判定，不由模型自述
+ * GateLoop 验证器 — 通过与否由 exit code 判定，不由模型自述
  *
  * 多个验证器 AND 关系，全部通过才算 PASS。
  * verify() 是唯一判定函数，exit code 模型改不了。

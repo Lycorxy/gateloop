@@ -1,6 +1,6 @@
 {
   "name": "frontend-codegen",
-  "description": "前端代码生成 ADS harness — 引擎驱动 inventory→design→code 三步流程。v13 新增 inventory anchor（客观输入先行 + 集合闭包防伪）：脚本枚举违规文件，design 必须覆盖，code 末尾重跑断言清零。",
+  "description": "前端代码生成 GateLoop harness — 引擎驱动 inventory→design→code 三步流程。v13 新增 inventory anchor（客观输入先行 + 集合闭包防伪）：脚本枚举违规文件，design 必须覆盖，code 末尾重跑断言清零。",
   "scratchDir": ".specflow/scratch",
   "scratchGcHours": 72,
   "maxAttempts": 5,
@@ -75,8 +75,8 @@
         "producesFresh": true,
         "custom": [
           "node .codebuddy/skills/frontend-codegen/scripts/verify-coverage.mjs --inventory .specflow/context/inventory.json --plan .specflow/context/current.json",
-          "npx nut ads metric design --input .specflow/context/current.json",
-          "npx nut ads metric architecture --input .specflow/context/current.json"
+          "npx nut gateloop metric design --input .specflow/context/current.json",
+          "npx nut gateloop metric architecture --input .specflow/context/current.json"
         ],
         "review": {
           "output": ".specflow/context/design-review.json",
@@ -113,8 +113,8 @@
         "fileSize": true,
         "prettier": true,
         "custom": [
-          "npx nut ads metric style-crosscheck --dir src/",
-          "npx nut ads metric code --dir src/",
+          "npx nut gateloop metric style-crosscheck --dir src/",
+          "npx nut gateloop metric code --dir src/",
           "npx nut lint check-naming \"src/**/*.{ts,tsx}\"",
           "node .codebuddy/skills/frontend-codegen/scripts/verify-completion.mjs --root src --plan .specflow/context/current.json"
         ],

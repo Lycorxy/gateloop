@@ -4,7 +4,11 @@ description: >-
     Figma 设计稿全流程还原：布局分析 + DOM+Style DSL 输出 + 像素验证。
     合并了布局规划（原 figma-layout-planner）和 DSL 生成两大能力。
     工作流：获取材料(含基线HTML) → 布局分析 → 直接输出完整优化HTML → MCP渲染对比 → 迭代修复。
-    通过 checkpoint.json + layout-plan.json 缓存机制防止步骤遗忘和参数遗漏。
+    通过 checkpoint.json + 布局_plan.json 缓存机制防止步骤遗忘和参数遗漏。
+    v13.4 核心：新增铁律 0g（spacing-report children 不含 absolute 浮层，必须交叉验证 baseline HTML）、
+    铁律 11a（策略 A 可行性前置检查，absolute-heavy 设计直接降级至策略 C）、
+    铁律 12a（元素位置偏差检查 + SSIM 不唯信，白色背景元素偏移 SSIM 惩罚极小但视觉不可用）、
+    更新经验教训 5/6/7（云枢智能管理中台案例：强转 flex 导致空状态偏移 190px）。
     v13.3 核心：修正 z_index 方向检查（区分 overlay 叠加在上→归并 vs occluded 被遮挡→过滤删除两种关系），避免被 card 遮挡的隐藏开关被错误渲染 + 铁律 6b 新增被遮挡元素过滤类型。
     v13.2 核心：新增铁律 3d 叠加兄弟归并规则（Switch/小按钮叠加在 card 右上角的模式必须 nest-into-sibling，禁止拆为独立区块）+ MCP overlay_hint 字段（自动检测小元素与大元素的叠加关系）。
     v2.0 核心：新增自适应三级拆分（Page→Region→Component，blocked→decomposed 不死路）+ 策略级联（A纯flex→B混合→C基线复用，策略C兜底必定达标）+ 局部验证（只看Task bounds内diff，不全页噪声）+ HTML快照自动回退 + GATE硬阻断（5道门禁防偷懒）+ 强制上下文内联（防遗忘）。
@@ -13,12 +17,12 @@ description: >-
     v12.3 核心：MCP 工具优先（figma_to_html 秒出基线 / figma_compare_html_file 一步渲染对比 / calc_spacing 盒模型精确间距）、
     禁止生成脚本文件、直接写真实内容（不用框线图/占位符）、25 项 CSS 转换技巧库（含 T25 inline-tag）、
     绝对定位转换硬性规则（禁止以"对齐精度"为由保留 absolute）、无效迭代检测、冗余元素过滤、
-    盒模型精度约束（box-sizing + border + padding 从 spacing-report.json 精确读取，不可目测）、
+    盒模型精度约束（box-sizing + border + padding 从 间距_report.json 精确读取，不可目测）、
     文字颜色逐节点提取（禁止用继承色替代 DSL 中的精确 color）、Switch 三层嵌套结构保真。
     触发词：figma还原优化、设计稿分析、布局规划、优化DSL还原、像素级对比迭代、还原度不够、继续优化还原。
     不要用于：单纯 figma 转 DSL、非 Figma 图片对比、纯代码审查、业务逻辑修改、生成最终代码/CSS。
-version: 2.1.0
-dependencies: [specflow-rules-engine]
+version: 2.2.0
+dependencies: []
 conflict-with: []
 allowed-tools: [mcp_call_tool, read_file, write_to_file, replace_in_file, search_content, search_file, execute_command]
 max-token: 5000
@@ -26,19 +30,25 @@ max-token: 5000
 
 # Figma DOM+Style DSL 全流程 v2.0
 
-> **v14 ADS harness 更新**：harness.mjs（803行状态机）废弃，由 ADS 引擎接管。
+> **v14 GateLoop harness 更新**：harness.mjs（803行状态机）废弃，由 GateLoop 引擎接管。
 > 4 个 anchor（materials/layout/reduce/deliver）替代 Step 0-5 + harness 命令。
 > 引擎 schema+custom+review 三层门禁替代 GATE 硬阻断。
 > 策略级联/局部验证/快照回退保留为模型执行逻辑（RULE.mdc 铁律10-13约束）。
 
-## ADS Harness 驱动模式（v14）
+> ⚠️ **唯一运行模式（必读）**：本 Skill 只能由 **GateLoop 引擎驱动（harness 模式）**运行。
+> 加载后**第一件事必须执行** `nut gateloop init`（见下方启动流程）；之后每个 anchor 由引擎注入指令，
+> 阶段完成后执行 `nut gateloop next` 触发 **verify 门禁**，未通过**禁止继续**。
+> **严禁**自驱「Step 0→5」流程、**严禁**手工维护 `checkpoint.json`——这些只会导致门禁完全失效（已被绕过）。
+> 下文「Step 1→5」等历史章节是各 anchor 内的**领域执行手册**，须在本 anchor 指令下执行，不是独立流水线。
+
+## GateLoop Harness 驱动模式（v14）
 
 ```
-传统模式（v2·harness.mjs）           ADS Harness 模式（v14）
+传统模式（v2·harness.mjs）           GateLoop Harness 模式（v14）
 ──────────────────────              ──────────────────────────
-harness.mjs init/status/gate   →    nut ads init/next/status
+harness.mjs init/status/gate   →    nut gateloop init/next/status
 checkpoint.json 状态源          →    anchor-state.json（引擎管理）
-GATE-1/2/3/4 硬阻断             →    ADS verify schema/custom/review
+GATE-1/2/3/4 硬阻断             →    GateLoop verify schema/custom/review
 .trimly/tmp/{fileKey}_{nodeId} →    .specflow/context/（统一路径）
 模型自觉执行 Step 0-5           →    引擎状态机推进 4 anchor
 ```
@@ -47,24 +57,24 @@ GATE-1/2/3/4 硬阻断             →    ADS verify schema/custom/review
 
 ```bash
 MANIFEST=.codebuddy/skills/figma-dom-style/anchor.config.json
-nut ads init $MANIFEST --task "还原 Figma <url>"
-# 引擎返回 materials anchor 指令（rulesInline 已内联 RULE.mdc）
-# 模型执行：MCP 三并行 → 产物写到 .specflow/context/ → nut ads next
+nut gateloop init $MANIFEST --task "还原 Figma <url>"
+# 引擎返回 materials anchor 指令（reads 已内联 RULE.mdc）
+# 模型执行：MCP 三并行 → 产物写到 .specflow/context/ → nut gateloop next
 # 引擎 producesExist+producesFresh 校验 → 推进 layout → reduce(需SubTask) → deliver(review 6项)
 ```
 
 ### 4 anchor 对应关系
 
-| ADS anchor | 原 Step | verify | 产出 |
+| anchor | 原 Step | verify | 产出 |
 |---|---|---|---|
-| materials | Step 1 | producesExist+Fresh | origin-dsl.json / spacing-report.json / baseline.html |
-| layout | Step 2 | schema+Fresh | layout-plan.json |
+| materials | Step 1 | producesExist+Fresh | 原始_dsl.json / 间距_report.json / baseline.html |
+| layout | Step 2 | schema+Fresh | 布局_plan.json |
 | reduce | Step 3-4 | producesExist+Fresh + requiresSubtasks | iter-final.html |
 | deliver | Step 5 | **review 6项** | reduce-review.json |
 
-### 模型执行逻辑（ADS 不管，RULE.mdc 约束）
+### 模型执行逻辑（GateLoop 引擎托管状态机与门禁，RULE.mdc 约束）
 
-以下领域逻辑由模型在 anchor 内部执行，ADS 只管推进+verify门禁：
+以下领域逻辑由模型在 anchor 内部执行，GateLoop 引擎只管状态机推进 + verify 门禁：
 - 策略级联 A→B→C（铁律11）
 - 局部验证 Task bounds diff（铁律12）
 - 快照回退（铁律13）
@@ -93,16 +103,16 @@ nut ads init $MANIFEST --task "还原 Figma <url>"
 
 > **v12.3 更新**（相对 v12.2）：
 >
-> 1. 新增 **calc_spacing MCP 调用**：Step 1 新增第 3 个并行 MCP 调用，产出 `spacing-report.json`（盒模型精确数据）
-> 2. 新增 **铁律 1a spacing-report 消费规则**：box-sizing / border / padding / sibling-gap 必须从 spacing-report.json 精确读取，禁止目测
-> 3. 新增 **铁律 3c 盒模型精度约束**：有 border 的元素必须显式设置 box-sizing: border-box（数据源：spacing-report.json 的 border.boxSizing）
+> 1. 新增 **calc_spacing MCP 调用**：Step 1 新增第 3 个并行 MCP 调用，产出 `间距_report.json`（盒模型精确数据）
+> 2. 新增 **铁律 1a spacing-report 消费规则**：box-sizing / border / padding / sibling-gap 必须从 间距_report.json 精确读取，禁止目测
+> 3. 新增 **铁律 3c 盒模型精度约束**：有 border 的元素必须显式设置 box-sizing: border-box（数据源：间距_report.json 的 border.boxSizing）
 > 4. 强化 **铁律 1 文字颜色精度**：每个 text 节点的 color 必须逐节点从 DSL style.fill 提取，禁止用继承色替代（特别注意同容器内不同 text 节点的语义化颜色）
 > 5. 扩展 **铁律 3b 第 4 条 Switch 三层嵌套结构**：底板（outer）+ 轨道（track）+ 圆点（dot），禁止合并层
 > 6. 检查清单新增第 9-10 项：box-sizing 检查 + 文字颜色逐节点检查
 
 > **v12.2 更新**（相对 v12.1）：
 >
-> 1. 新增 **铁律 3a 绝对定位转换硬性规则**：iter-{N}.html 中 absolute 节点必须为 0（除例外场景），禁止以"确保对齐精度"为由保留 absolute
+> 1. 新增 **铁律 3a 绝对定位转换硬性规则**：优化_iter-{N}.html 中 absolute 节点必须为 0（除例外场景），禁止以"确保对齐精度"为由保留 absolute
 > 2. 新增 **铁律 3b 必须保留 absolute 的例外场景**：对话区高亮叠层 / decorator / 图标偏移 / Switch 圆点
 > 3. 新增 **铁律 6a 无效迭代检测**：对同一区域连续修改 2 次后 diff 变化 < 0.5% → 立即停止，转向其他区域
 > 4. 新增 **铁律 6b 冗余元素过滤**：堆叠统计 Switch / 重复 indicator / placeholder 必须过滤
@@ -135,9 +145,9 @@ nut ads init $MANIFEST --task "还原 Figma <url>"
 
 > ⚠️ **高频踩坑警示**（v12.3 新增，必读）：
 >
-> - **box-sizing 遗漏**：有 border 的元素（特别是 active tab、card）必须显式设置 `box-sizing: border-box`，否则 border 会撑高元素 2-4px。数据源：`spacing-report.json` 的 `border.boxSizing`。
+> - **box-sizing 遗漏**：有 border 的元素（特别是 active tab、card）必须显式设置 `box-sizing: border-box`，否则 border 会撑高元素 2-4px。数据源：`间距_report.json` 的 `border.boxSizing`。
 > - **文字颜色用继承色**：同容器内不同 text 节点可能有不同 color（语义化颜色），如对话区"被举报人"红色 vs "举报人"深色。必须逐节点从 DSL `style.fill` 提取，禁止用 body/parent 继承色。
-> - **非等间距用 gap 统一**：当容器内子元素间距不均匀时（如 divider 到 confirm 15px、confirm 到右边 0px），必须用 `margin-left` 逐个精确控制，禁止用 `gap` 统一。数据源：`spacing-report.json` 的 `siblings[].gap`。
+> - **非等间距用 gap 统一**：当容器内子元素间距不均匀时（如 divider 到 confirm 15px、confirm 到右边 0px），必须用 `margin-left` 逐个精确控制，禁止用 `gap` 统一。数据源：`间距_report.json` 的 `siblings[].gap`。
 > - **Switch 合并层**：Switch 是三层嵌套（底板 28×18 灰色 + track 20×10 蓝色/灰色 + dot 8.33×8.33 白色），禁止合并为两层或一层。底板 border-radius 通常非对称（如 `0 0 0 4px`）。
 
 > ⚠️ **高频踩坑警示**（v12.1 新增，必读）：
@@ -163,7 +173,7 @@ nut ads init $MANIFEST --task "还原 Figma <url>"
 | `figma_compare_dsl_file` | DSL 文件 → 渲染 → 对比 → diff | 备用 | `url`, `dslFilePath`, `outDir` |
 | `html_to_image` | HTML 字符串 → PNG | 备用 | `html`, `width`, `height`, `outDir` |
 | `compare_image_files` | 两个图片文件对比 | 备用 | `image1Path`, `image2Path`, `dslFilePath`, `outDir` |
-| `calc_spacing` | 盒模型间距计算 → spacing-report.json | Step 1 | `url`, `nodeId` |
+| `calc_spacing` | 盒模型间距计算 → 间距_report.json | Step 1 | `url`, `nodeId` |
 | `compress_image` | 图片压缩 | 备用 | `imagePath`, `outDir` |
 
 ### MCP 调用规则
@@ -172,100 +182,68 @@ nut ads init $MANIFEST --task "还原 Figma <url>"
 1. 渲染 + 对比 → 一律用 figma_compare_html_file（不要拆成 html_to_image + compare_image_files）
 2. 获取基线 HTML → 用 figma_to_html（不要手动解析 DSL 写 HTML）
 3. 分析 DSL → 用 read_file + search_content（不要用 node -e 脚本）
-4. 图标 URL → 从 figma_to_html 产出的 HTML 或 origin-dsl.json 中用 search_content 提取
+4. 图标 URL → 从 figma_to_html 产出的 HTML 或 原始_dsl.json 中用 search_content 提取
 5. 无依赖的 MCP 调用 → 并行执行（如 Step 1 的 figma_baseline_compare + figma_to_html）
 ```
 
 ---
 
-## 2. 工作流总览
+## 2. 工作流总览（由 GateLoop 引擎驱动，禁止自驱）
 
-```
-🔒 Step 0:  规则注入 — use_skill(specflow-rules-engine)
-   Step 1:  获取基准材料 — MCP(figma_baseline_compare) + MCP(figma_to_html) + MCP(calc_spacing) 三并行
-   Step 2:  分析 + 布局方案 + 任务拆分 — MCP(figma_to_interaction_dsl) + read DSL + read spacing-report → layout-plan.json + task-queue.json
-   Step 3:  渐进式实现 — 骨架(3a) → 区域逐个实现+验证(3b) → 整合全量检测(3c) → MCP(figma_compare_html_file)
-   Step 4:  差异分析+修复 — 看 diff 图，针对性 replace_in_file → MCP(figma_compare_html_file)
-   Step 5:  迭代控制 — ≥95% 达标 or 终止
+本 Skill 的 4 个 anchor 由引擎按 `dependsOn` 拓扑推进，**每个 anchor 完成后的 verify 门禁不过则无法进入下一阶段**：
 
-每步完成后必须：
-  ① 更新 checkpoint.json（currentStep + completedSteps + artifacts）
-  ② 播报完成消息
+| anchor | 领域动作（在 anchor 指令下执行） | verify 门禁 | 关键产物 |
+|---|---|---|---|
+| materials | 获取基准材料：MCP(figma_baseline_compare)+figma_to_html+calc_spacing 三并行 | producesExist + producesFresh | 原始_dsl.json / 间距_report.json / baseline.html |
+| layout | 分析+布局方案+任务拆分：figma_to_interaction_dsl + read DSL + read spacing-report → 布局_plan.json + task-queue.json | schema + producesFresh + custom(accuracy layout) | 布局_plan.json |
+| reduce | 渐进式实现：骨架(3a)→区域逐个实现+验证(3b)→整合检测(3c)→figma_compare_html_file；按策略级联 A→B→C | producesExist + producesFresh + requiresSubtasks + custom(accuracy reduce) | iter-final.html |
+| deliver | 差异分析+修复+迭代控制：看 diff 图 replace_in_file → figma_compare_html_file → ≥95% 达标 | custom(accuracy deliver) + review 6 项(model 带证据) | reduce-review.json |
 
-🚫 禁止行为：
+> **运行契约**：模型只在本 anchor 的引擎指令下执行上述「领域动作」；**不得**自驱 `Step 0→5`、**不得**手工维护 `checkpoint.json`。
+> 「Step 1→5」历史章节是各 anchor 内的领域手册，须服从引擎门禁，门禁未过不得继续。
+
+🚫 禁止行为（门禁外也生效）：
   ✗ 生成 .cjs/.js/.mjs/.ts 脚本文件（用 MCP 工具替代）
   ✗ 用 node -e 执行内联脚本分析 DSL（用 read_file + search_content 替代）
   ✗ 手动用 Playwright/puppeteer 截图（用 figma_compare_html_file 替代）
   ✗ 输出框线图/占位符/skeleton（直接写真实内容）
-```
 
 ---
 
-## 3. 🛑 入口守卫
+## 3. 🛑 门禁（由 GateLoop 引擎强制执行，非文本约束）
 
-```
-本 Skill 加载后必须按 Step 0→1→2→3→4→5 顺序执行。
-每步必须播报完成消息 + 更新 checkpoint。
-未播报 = 未执行 = 违规。
+本 Skill **没有**自管理的「入口守卫」或 `checkpoint.json`——所有门禁都由 GateLoop 引擎在 `nut gateloop next` 时强制执行：
 
-前置条件：
+- **锚闭环门禁**：`materials/layout/reduce/deliver` 每个 anchor 的 verify（producesExist/Fresh + schema + custom + requiresSubtasks + review）未通过，**引擎拒绝推进**。
+- **SubTask 门禁**：`reduce` 声明 `requiresSubtasks`，所有 Task 未 completed/decomposed 且达标，不得进入 deliver。
+- **review 门禁（四道）**：`deliver` 的 6 项 model 评审须逐条 verdict+evidence（空话 FAIL），blocking 项 fail 禁止交付。
+
+前置条件（满足后才调用 `nut gateloop init`）：
   ① 用户提供有效 Figma URL（含 node-id）
   ② figma-trimly MCP server 已连接（或可降级）
-  ③ 临时目录策略：中间产物 → .trimly/tmp/{fileKey}_{nodeId}/
-  ④ 模式选择：A 从零设计 / B 已实现优化
+  ③ 中间产物统一落 `.specflow/context/`（由引擎托管，替代旧 `.trimly/tmp`）
 
-禁止行为：
-  ✗ 跳过任何步骤
-  ✗ 不更新 checkpoint
-  ✗ 不播报完成消息
-  ✗ 生成脚本文件（.cjs/.js/.mjs/.ts）— 用 MCP 工具替代
-  ✗ 用 node -e 执行内联脚本 — 用 read_file + search_content 替代
-  ✗ 输出框线图/占位符 — 直接写真实内容
-```
+> 若模型发现自己「绕过了门禁」或「没调用 nut gateloop」，说明正在自驱旧流程——**立即停止，改为 `nut gateloop init` 重启 harness**。
 
 ---
 
-## Step 0 — 规则注入
+## Step 0 — 规则注入（materials anchor 准备）
+
+> 本段是 **materials anchor** 的领域准备手册。状态由 GateLoop 引擎经 `anchor-state.json` 托管，**禁止创建/维护 checkpoint.json**。
+> 临时产物统一落 `.specflow/context/`（由引擎托管，替代旧 `.trimly/tmp`）。
 
 ```
-1. use_skill(specflow-rules-engine) → 注入前端规范
+1. 引擎已通过 reads 内联 RULE.mdc（无需 use_skill 注入前端规范）
 2. read_file(RULE.mdc) → 注入本 Skill 专属规则
 3. 确认 MCP server figma-trimly 可用
-4. 创建临时目录 .trimly/tmp/{fileKey}_{nodeId}/
-5. 初始化 checkpoint.json
+4. 产物统一写入 .specflow/context/（无需自建临时目录）
 ```
 
-### checkpoint.json 格式（v12 简化版）
+### 状态管理（引擎托管，无需手工 checkpoint）
 
-```json
-{
-  "version": "12.0",
-  "figmaUrl": "<Figma URL>",
-  "mode": "A",
-  "currentStep": "0",
-  "completedSteps": ["0"],
-  "iteration": 1,
-  "similarity": null,
-  "artifacts": {
-    "dslJson": "origin-dsl.json",
-    "spacingReport": "spacing-report.json",
-    "baselineHtml": "<figma_to_html 产出的文件名>",
-    "originPng": "origin.png",
-    "renderPng": "render.png",
-    "diffPng": "diff.png",
-    "layoutPlan": "layout-plan.json",
-    "taskQueue": "task-queue.json",
-    "skeletonHtml": "skeleton.html",
-    "latestHtml": "iter-{N}.html",
-    "latestDsl": "iter-{N}.dsl.json",
-    "interactionDsl": null,
-    "manifest": "assets/manifest.json"
-  },
-  "layoutPlanSummary": null,
-  "taskQueueSummary": null,
-  "history": []
-}
-```
+> **禁止**创建 `checkpoint.json`。所有步骤/迭代/产物状态由 GateLoop 引擎写入 `.specflow/anchor-state.json`（见 §3 门禁），
+> 领域产物（layout-plan.json / task-queue.json / iter-final.html / reduce-review.json）落 `.specflow/context/`。
+> 恢复中断：`nut gateloop status` 返回当前 anchor + nextAction，从中断处继续。
 
 ---
 
@@ -274,11 +252,11 @@ nut ads init $MANIFEST --task "还原 Figma <url>"
 ### MCP 工具调用（三个并行）
 
 ```
-临时目录 = {workspace}/.trimly/tmp/{fileKey}_{nodeId}/
+产物目录 = {workspace}/.specflow/context/
 
 ① MCP figma-trimly:figma_baseline_compare
    params: { url: "<Figma URL>", outDir: "<临时目录>" }
-   产出：origin-dsl.json / origin.png / render.png / diff.png
+   产出：原始_dsl.json / 原始_设计.png / 渲染_设计.png / 差异_设计.png
 
 ② MCP figma-trimly:figma_to_html  ← v12 新增
    params: { url: "<Figma URL>", outDir: "<临时目录>" }
@@ -299,18 +277,18 @@ nut ads init $MANIFEST --task "还原 Figma <url>"
    │  · 复制 position:absolute; left:XX; top:YY 定位      │
    │  · 复制 absolute 定位的 width/height                  │
    │  · 以"基线 diff 更低"为由保留 absolute                │
-   │  · 将基线 HTML 作为 iter-{N}.html 的模板起点          │
+   │  · 将基线 HTML 作为 优化_iter-{N}.html 的模板起点          │
    └─────────────────────────────────────────────────────┘
 
 ③ MCP figma-trimly:calc_spacing  ← 🆕 v12.3 新增
    params: { url: "<Figma URL>", nodeId: "<nodeId>" }
-   产出：spacing-report.json（每个容器的精确盒模型数据）
+   产出：间距_report.json（每个容器的精确盒模型数据）
    用途：Step 2/3 消费精确的 padding/border/boxSizing/sibling-gap，禁止目测
 
 三个 MCP 调用无依赖，可并行执行。
 ```
 
-### spacing-report.json 关键字段（v12.3 新增 — Step 2/3 必须消费）
+### 间距_report.json 关键字段（v12.3 新增 — Step 2/3 必须消费）
 
 ```
 每个容器节点包含：
@@ -320,7 +298,7 @@ nut ads init $MANIFEST --task "还原 Figma <url>"
   - effectiveHeight / effectiveWidth → 包含 padding+border 的实际尺寸
   - firstChildId / lastChildId → 用于 sibling gap 计算
 
-⚠️ 铁律 1a 强制：以上字段必须从 spacing-report.json 读取，禁止从 DSL 目测推算
+⚠️ 铁律 1a 强制：以上字段必须从 间距_report.json 读取，禁止从 DSL 目测推算
 ⚠️ 特别注意 border.boxSizing：有 border 的容器必须设置 box-sizing: border-box
 ```
 
@@ -342,8 +320,8 @@ nut ads init $MANIFEST --task "还原 Figma <url>"
 
 ```
 1. MCP figma-trimly:figma_to_interaction_dsl → 获取交互标注
-2. read_file(origin-dsl.json) → 读取 DSL 元数据 + 顶层结构
-3. search_content(origin-dsl.json, pattern) → 提取：
+2. read_file(原始_dsl.json) → 读取 DSL 元数据 + 顶层结构
+3. search_content(原始_dsl.json, pattern) → 提取：
    - 所有 text 节点内容
    - ⚠️ 每个 text 节点的 style.fill（文字颜色，逐节点提取，不可用继承色）  ← 🆕 v12.3
      特别注意：同容器内不同 text 节点可能有不同 color（语义化颜色）
@@ -356,7 +334,7 @@ nut ads init $MANIFEST --task "还原 Figma <url>"
    - 真实文字内容
    - 图标图片 URL
    - 颜色/字体/尺寸样式
-5. read_file(spacing-report.json) → 读取盒模型精确数据  ← 🆕 v12.3 新增
+5. read_file(间距_report.json) → 读取盒模型精确数据  ← 🆕 v12.3 新增
    提取每个容器的：
    - border.boxSizing（有 border 的容器必须 box-sizing: border-box）
    - border.top/right/bottom/left（精确 border-width）
@@ -365,7 +343,7 @@ nut ads init $MANIFEST --task "还原 Figma <url>"
    - effectiveHeight / effectiveWidth（实际尺寸）
 ```
 
-### 2b. 布局分析 → layout-plan.json
+### 2b. 布局分析 → 布局_plan.json
 
 ```
 基于 DSL 结构 + 基线 HTML，分析：
@@ -380,10 +358,10 @@ nut ads init $MANIFEST --task "还原 Figma <url>"
    - 重复 indicator（相同尺寸+样式）→ technique: "filter-redundant"
    - placeholder/temp/draft 命名元素 → technique: "filter-redundant"
 
-输出 layout-plan.json → write_to_file
+输出 布局_plan.json → write_to_file
 ```
 
-### layout-plan.json 格式
+### 布局_plan.json 格式
 
 ```json
 {
@@ -467,7 +445,7 @@ nut ads init $MANIFEST --task "还原 Figma <url>"
 每个 Task 记录：
   - id / level / name / scope（nodeId 范围）
   - input（该区域的 DSL + spacing-report + layout-plan decisions）
-  - output（填充到 skeleton.html 的对应位置）
+  - output（填充到 优化_骨架.html 的对应位置）
   - status（pending / in_progress / completed / blocked）
   - checklist（该区域的精简检查项）
   - diffHistory（每次渲染对比的 diff 记录）
@@ -497,9 +475,9 @@ nut ads init $MANIFEST --task "还原 Figma <url>"
 ### Step 3a — 骨架任务 [中自由度 · 强制]
 
 ```
-1. 读取 layout-plan.json → skeleton.layout + skeleton.regions
+1. 读取 布局_plan.json → skeleton.layout + skeleton.regions
 2. 读取 task-queue.json → tasks[0] (skeleton)
-3. write_to_file(skeleton.html) → 只写顶层结构：
+3. write_to_file(优化_骨架.html) → 只写顶层结构：
    - root 容器：display:flex; flex-direction:row/column（非 absolute）
    - 每个 region：空容器 + 正确尺寸策略（fixed / flex:1）
    - 每个 region 内放占位标记：<!-- TASK:{taskId} -->
@@ -523,14 +501,14 @@ nut ads init $MANIFEST --task "还原 Figma <url>"
 
   ① 读取上下文（防遗忘 — 铁律 5a）
      - read_file(task-queue.json) → 获取 currentTask + bounds + strategy
-     - read_file(skeleton.html 或 iter-{N}.html) → 获取当前 HTML
-     - read_file(layout-plan.json) → 获取该 Task 的 layoutDecisions
+     - read_file(优化_骨架.html 或 优化_iter-{N}.html) → 获取当前 HTML
+     - read_file(布局_plan.json) → 获取该 Task 的 layoutDecisions
      - 内联当前 Task ID + 策略 + 轮次到操作描述中
 
   ② 策略 A — 纯 Flex/Grid 语义化（默认）
      - replace_in_file：将 <!-- TASK:{taskId} --> 替换为 flex/grid 布局内容
      - 应用 CSS 技巧（T1-T25）+ 铁律 3a/3b/3c/1
-     - 保存快照：copy skeleton.html → snapshots/task-{id}-r{M}.html
+     - 保存快照：copy 优化_骨架.html → 快照/task-{id}-r{M}.html
 
   ③ per-region absolute 转换门禁（铁律 3a — diff 判定前执行）
      - search_content(HTML, "position:\\s*absolute") → 找 absolute 节点
@@ -539,7 +517,7 @@ nut ads init $MANIFEST --task "还原 Figma <url>"
      - 不通过 → 禁止渲染对比（GATE 硬阻断）
 
   ④ MCP figma_compare_html_file → 渲染全页对比
-     - 读 diff.png
+     - 读 差异_设计.png
      - 🆕 v2.0 局部验证：只分析当前 Task bounds 区域内的红色像素
      - 计算 local diff = 红色面积 / bounds 区域面积
 
@@ -567,7 +545,7 @@ nut ads init $MANIFEST --task "还原 Figma <url>"
      - status: pending → in_progress → completed / decomposed
      - strategy: A / B / C
      - diffHistory: [{ round, globalDiff, localDiff, strategy }]
-     - snapshot: "snapshots/task-{id}-r{M}.html"
+     - snapshot: "快照/task-{id}-r{M}.html"
      - absoluteCount + absoluteExceptions
 
   ⑨ 播报（防遗忘 — 每步必播报）
@@ -585,11 +563,11 @@ nut ads init $MANIFEST --task "还原 Figma <url>"
    - 有 pending/in_progress → 报警：以下 Task 未完成：{list}
    - 全部完成 → 继续
 
-2. 检查 skeleton.html 中是否还有未填充的 <!-- TASK:xxx --> 占位
+2. 检查 优化_骨架.html 中是否还有未填充的 <!-- TASK:xxx --> 占位
    - 有 → 报警
    - 无 → 继续
 
-3. 将 skeleton.html 复制为 iter-1.html
+3. 将 优化_骨架.html 复制为 iter-1.html
 
 4. 执行完整 10 项绝对定位转换检查清单（见下方）
 
@@ -601,20 +579,20 @@ nut ads init $MANIFEST --task "还原 Figma <url>"
 6. MCP figma_compare_html_file → 全页渲染对比
    - similarity ≥ 95% → 达标，进入交付
    - similarity < 95% → 进入 Step 4 差异修复
-     - 读 diff.png 找最大红区
+     - 读 差异_设计.png 找最大红区
      - 对对应 Task 追加修复轮次（可升级策略）
 
-7. 更新 checkpoint: artifacts.latestHtml = "iter-1.html"
+7. 更新 task-queue.json 该 Task 的 diffHistory（引擎据 `.specflow/context` 产物校验，无需手工 checkpoint）
 8. 更新 task-queue.json: finalIntegration.status = "completed"
 9. 播报最终结果
 ```
 
 ### 🚫 绝对定位转换检查清单（v12.3 沿用 — Step 3c 输出前必检）
 
-> **铁律 3a 强制**：iter-{N}.html 中 absolute 节点必须为 0（除铁律 3b 例外场景外）
+> **铁律 3a 强制**：优化_iter-{N}.html 中 absolute 节点必须为 0（除铁律 3b 例外场景外）
 
 ```
-输出 iter-{N}.html 前，逐项检查以下 10 项（全部 ✓ 才可输出）：
+输出 优化_iter-{N}.html 前，逐项检查以下 10 项（全部 ✓ 才可输出）：
 
 □ 1. root 容器：display:flex（非 position:absolute）
 □ 2. sidebar / main：flex item + flex-shrink:0/flex:1（非 absolute）
@@ -631,9 +609,9 @@ nut ads init $MANIFEST --task "还原 Figma <url>"
 
 □ 9. 盒模型精度（v12.3 新增 — 铁律 3c 强制）  ← 🆕
      □ 有 border 的元素必须显式设置 box-sizing: border-box
-       （数据源：spacing-report.json 的 border.boxSizing）
-     □ border-width 精确值来自 spacing-report.json（非目测）
-     □ padding 精确值来自 spacing-report.json（非目测）
+       （数据源：间距_report.json 的 border.boxSizing）
+     □ border-width 精确值来自 间距_report.json（非目测）
+     □ padding 精确值来自 间距_report.json（非目测）
      □ 非等间距的 sibling gap 用 margin-left 精确控制（非 gap 统一）
 
 □ 10. 文字颜色精度（v12.3 新增 — 铁律 1 强化）  ← 🆕
@@ -651,8 +629,8 @@ nut ads init $MANIFEST --task "还原 Figma <url>"
 | --- | --- | --- |
 | A. 布局 | flex-row/column、grid、gap | css-technique-library T1-T2 |
 | B. 区域 | 固定宽度 vs flex:1、overflow | css-technique-library T3 |
-| C. 尺寸/间距 | padding、margin、width/height、box-sizing | spacing-report.json（铁律 1a/3c）+ css-technique-library T2-T3 |
-| D. 样式 | color（逐节点）、font、border、background、radius | DSL style.fill + spacing-report.json border |
+| C. 尺寸/间距 | padding、margin、width/height、box-sizing | 间距_report.json（铁律 1a/3c）+ css-technique-library T2-T3 |
+| D. 样式 | color（逐节点）、font、border、background、radius | DSL style.fill + 间距_report.json border |
 | E. 资源 | 图标 <img src>、图片背景 | manifest.json |
 | F. 交互 | hover、active 状态（如有） | interaction DSL |
 
@@ -692,17 +670,17 @@ nut ads init $MANIFEST --task "还原 Figma <url>"
 ```
 
 > ⚠️ **v12.4 强制**：播报中必须包含"任务队列"完成情况和"检查清单"通过情况。
-> 如果 absolute 节点 > 0（除例外场景外），禁止播报"达标"，必须回到 Step 3 修正。
+> 如果 absolute 节点 > 0（除例外场景外），禁止播报"达标"，必须回到 reduce anchor 修正（铁律3a/0f）。
 
 ---
 
 ## Step 4 — 差异分析 + 修复 [中自由度]
 
 ```
-1. read_file(render.png) → 查看优化版渲染图
-2. read_file(diff.png) → 查看差异图（红色=差异区域）
-3. read_file(origin.png) → 对比原图
-4. 识别差异区域 → 针对性 replace_in_file(iter-{N}.html)
+1. read_file(渲染_设计.png) → 查看优化版渲染图
+2. read_file(差异_设计.png) → 查看差异图（红色=差异区域）
+3. read_file(原始_设计.png) → 对比原图
+4. 识别差异区域 → 针对性 replace_in_file(优化_iter-{N}.html)
 5. MCP figma-trimly:figma_compare_html_file → 重新渲染对比
 6. 重复直到 ≥95% 或达到迭代上限
 ```
@@ -728,16 +706,16 @@ nut ads init $MANIFEST --task "还原 Figma <url>"
 
 | 差异类型 | 修复方法 |
 | --- | --- |
-| 元素位置偏移 | 调整 padding/margin/gap（数据源：spacing-report.json） |
+| 元素位置偏移 | 调整 padding/margin/gap（数据源：间距_report.json） |
 | 文字大小/颜色不符 | 对照 DSL style.fill 逐节点修正颜色（铁律 1）；字号对照 DSL font_size |
 | 图标缺失/错误 | 从基线 HTML 提取正确 figmaSrc |
 | 背景色不符 | 对照 DSL background_color 修正 |
-| 边框/圆角不符 | 对照 spacing-report.json border 字段修正；有 border 时加 box-sizing: border-box（铁律 3c） |
+| 边框/圆角不符 | 对照 间距_report.json border 字段修正；有 border 时加 box-sizing: border-box（铁律 3c） |
 | 元素溢出 | 添加 overflow:hidden 或调整 flex-shrink |
 | tag+文字被错排为两列 | 检查 DSL 是否有 `render_hint.inline_tag` / `text_indent`，改用 T25 float:left + 文字流 |
 | tab/card 高度多 2px  ← 🆕 v12.3 | 检查 border 元素是否缺少 box-sizing: border-box |
 | 对话区文字颜色不对  ← 🆕 v12.3 | 检查同容器内不同 text 节点是否有不同 color（语义化颜色） |
-| 按钮间距不对  ← 🆕 v12.3 | 检查 spacing-report.json siblings[].gap，非等间距用 margin-left 精确控制 |
+| 按钮间距不对  ← 🆕 v12.3 | 检查 间距_report.json siblings[].gap，非等间距用 margin-left 精确控制 |
 | Switch 缺灰色底板  ← 🆕 v12.3 | 检查 Switch 是否三层嵌套（底板+track+dot），禁止合并层 |
 
 ---
@@ -751,7 +729,7 @@ nut ads init $MANIFEST --task "还原 Figma <url>"
   ① 识别 Top 3 差异区域
   ② replace_in_file 针对性修复
   ③ MCP figma_compare_html_file 重新对比
-  ④ 更新 checkpoint（iteration++ / similarity）
+  ④ 更新 iteration / similarity 记录（写入 `.specflow/context` 产物，引擎托管状态）
   ⑤ 播报迭代结果
 
 终止条件：
@@ -762,12 +740,11 @@ nut ads init $MANIFEST --task "还原 Figma <url>"
 ### 交付
 
 ```
-1. 最终 HTML → iter-{N}.html（临时目录）
-2. DOM+Style DSL → iter-{N}.dsl.json（如需）
-3. layout-plan.json
+1. 最终 HTML → .specflow/context/iter-final.html
+2. DOM+Style DSL → .specflow/context/（如需）
+3. 布局_plan.json → .specflow/context/
 4. assets/manifest.json
-5. checkpoint.json（完整历史记录）
-6. 更新 checkpoint.completedSteps += ["3","4","5"]
+> 完成上述后执行 `nut gateloop next`，由引擎 review 门禁（6 项）校验通过才交付。
 ```
 
 ---
@@ -776,8 +753,8 @@ nut ads init $MANIFEST --task "还原 Figma <url>"
 
 | 场景 | 处理 |
 | --- | --- |
-| checkpoint.json 损坏 | 从 Step 0 重新开始 |
-| layout-plan.json 缺失 | 回退到 Step 2 重新分析 |
+| 状态异常/中断 | `nut gateloop status` 查询当前 anchor，从断点继续（状态由引擎 anchor-state.json 托管） |
+| 布局_plan.json 缺失 | 回退到 Step 2 重新分析 |
 | MCP server 未连接 | block 阻断，提示连接 figma-trimly MCP |
 | figma_to_html 失败 | 降级为 figma_to_dsl + 手动分析 |
 | calc_spacing 失败 | block 阻断，提示盒模型数据不可用（不可跳过，铁律 1a） |

@@ -250,10 +250,8 @@ function checkCommandSecurity(command: string): ErrorDetail | null {
 /**
  * 解析错误输出，提取结构化信息
  */
-function parseError(stderr: string, command: string): ErrorDetail {
+function detectNotFound(stderr: string): ErrorDetail | null {
     const lowerErr = stderr.toLowerCase()
-
-    // 文件不存在
     if (
         lowerErr.includes('enoent') ||
         lowerErr.includes('no such file') ||
@@ -269,8 +267,11 @@ function parseError(stderr: string, command: string): ErrorDetail {
             suggestion: '请检查路径是否正确'
         }
     }
+    return null
+}
 
-    // 权限错误
+function detectPermission(stderr: string): ErrorDetail | null {
+    const lowerErr = stderr.toLowerCase()
     if (
         lowerErr.includes('eacces') ||
         lowerErr.includes('permission denied') ||
@@ -285,8 +286,10 @@ function parseError(stderr: string, command: string): ErrorDetail {
             suggestion: '请检查文件权限或使用管理员权限运行'
         }
     }
+    return null
+}
 
-    // TypeScript/编译错误 - 提取位置
+function detectCompileError(stderr: string): ErrorDetail | null {
     const tsMatch = stderr.match(/([^\s]+\.tsx?):(\d+):(\d+)/i)
     if (tsMatch) {
         return {
@@ -298,8 +301,6 @@ function parseError(stderr: string, command: string): ErrorDetail {
             code: 'COMPILE_ERROR'
         }
     }
-
-    // ESLint 错误
     const eslintMatch = stderr.match(/([^\s]+):(\d+):(\d+):\s*error/i)
     if (eslintMatch) {
         return {
@@ -311,8 +312,13 @@ function parseError(stderr: string, command: string): ErrorDetail {
             code: 'LINT_ERROR'
         }
     }
+    return null
+}
 
-    // 通用错误
+function parseError(stderr: string, command: string): ErrorDetail {
+    const detected =
+        detectNotFound(stderr) || detectPermission(stderr) || detectCompileError(stderr)
+    if (detected) return detected
     return {
         type: 'EXIT_ERROR',
         message: stderr.split('\n')[0].slice(0, 200) || `命令执行失败: ${command}`,
@@ -323,15 +329,12 @@ function parseError(stderr: string, command: string): ErrorDetail {
 /**
  * 生成输出摘要
  */
-function generateSummary(
+function summarizeRead(
     command: string,
-    stdout: string,
+    lines: string[],
     context?: ExecOptions['context']
 ): OutputSummary | undefined {
     const cmd = command.toLowerCase()
-    const lines = stdout.split('\n').filter((l) => l.trim())
-
-    // 文件读取
     if (context?.operation === 'read' || cmd.includes('cat ') || cmd.includes('type ')) {
         const target = context?.target || command.split(/\s+/).pop()
         let size = 0
@@ -346,8 +349,15 @@ function generateSummary(
             data: { file: target, lines: lines.length, size }
         }
     }
+    return undefined
+}
 
-    // 文件列表
+function summarizeList(
+    command: string,
+    lines: string[],
+    context?: ExecOptions['context']
+): OutputSummary | undefined {
+    const cmd = command.toLowerCase()
     if (context?.operation === 'list' || cmd.includes('ls ') || cmd.includes('dir ')) {
         const fileCount = lines.length
         const dirs = lines.filter((l) => l.includes('<DIR>') || l.endsWith('/')).length
@@ -357,8 +367,15 @@ function generateSummary(
             data: { total: fileCount, directories: dirs, files: fileCount - dirs }
         }
     }
+    return undefined
+}
 
-    // 搜索
+function summarizeSearch(
+    command: string,
+    lines: string[],
+    context?: ExecOptions['context']
+): OutputSummary | undefined {
+    const cmd = command.toLowerCase()
     if (context?.operation === 'search' || cmd.includes('grep ') || cmd.includes('findstr ')) {
         const matchCount = lines.length
         return {
@@ -367,8 +384,15 @@ function generateSummary(
             data: { matches: matchCount }
         }
     }
+    return undefined
+}
 
-    // Git 操作
+function summarizeGit(
+    command: string,
+    stdout: string,
+    context?: ExecOptions['context']
+): OutputSummary | undefined {
+    const cmd = command.toLowerCase()
     if (context?.operation === 'git' || cmd.startsWith('git ')) {
         if (cmd.includes('status')) {
             const modified = (stdout.match(/modified:/gi) || []).length
@@ -389,8 +413,15 @@ function generateSummary(
             }
         }
     }
+    return undefined
+}
 
-    // npm/pnpm 操作
+function summarizeNpm(
+    command: string,
+    stdout: string,
+    context?: ExecOptions['context']
+): OutputSummary | undefined {
+    const cmd = command.toLowerCase()
     if (context?.operation === 'npm' || cmd.includes('npm ') || cmd.includes('pnpm ')) {
         if (cmd.includes('install')) {
             const pkgMatch = stdout.match(/added (\d+) packages?/i)
@@ -403,13 +434,20 @@ function generateSummary(
         if (cmd.includes('run ')) {
             return {
                 type: 'npm',
-                brief: `脚本执行完成`,
+                brief: '脚本执行完成',
                 data: { script: cmd.split('run ')[1]?.split(/\s/)[0] }
             }
         }
     }
+    return undefined
+}
 
-    // 测试
+function summarizeTest(
+    command: string,
+    stdout: string,
+    context?: ExecOptions['context']
+): OutputSummary | undefined {
+    const cmd = command.toLowerCase()
     if (context?.operation === 'test' || cmd.includes('jest') || cmd.includes('vitest')) {
         const passMatch = stdout.match(/(\d+)\s*pass/i)
         const failMatch = stdout.match(/(\d+)\s*fail/i)
@@ -421,8 +459,10 @@ function generateSummary(
             data: { passed: pass, failed: fail }
         }
     }
+    return undefined
+}
 
-    // 通用摘要
+function summarizeGeneric(lines: string[]): OutputSummary | undefined {
     if (lines.length > 0) {
         return {
             type: 'generic',
@@ -430,8 +470,24 @@ function generateSummary(
             data: { lines: lines.length }
         }
     }
-
     return undefined
+}
+
+function generateSummary(
+    command: string,
+    stdout: string,
+    context?: ExecOptions['context']
+): OutputSummary | undefined {
+    const lines = stdout.split('\n').filter((l) => l.trim())
+    return (
+        summarizeRead(command, lines, context) ||
+        summarizeList(command, lines) ||
+        summarizeSearch(command, lines) ||
+        summarizeGit(command, stdout, context) ||
+        summarizeNpm(command, stdout, context) ||
+        summarizeTest(command, stdout, context) ||
+        summarizeGeneric(lines)
+    )
 }
 
 /**
@@ -683,6 +739,35 @@ export async function execShell(
  * @param args 脚本参数
  * @param options 执行选项
  */
+const SCRIPT_RUNNERS: Record<
+    string,
+    (absPath: string, args: string[]) => { command: string; scriptArgs: string[] }
+> = {
+    js: (p, a) => ({ command: 'node', scriptArgs: [p, ...a] }),
+    mjs: (p, a) => ({ command: 'node', scriptArgs: [p, ...a] }),
+    cjs: (p, a) => ({ command: 'node', scriptArgs: [p, ...a] }),
+    ts: (p, a) => ({ command: 'npx', scriptArgs: ['tsx', p, ...a] }),
+    mts: (p, a) => ({ command: 'npx', scriptArgs: ['tsx', p, ...a] }),
+    cts: (p, a) => ({ command: 'npx', scriptArgs: ['tsx', p, ...a] }),
+    py: (p, a) => ({ command: isWindows ? 'python' : 'python3', scriptArgs: [p, ...a] }),
+    sh: (p, a) => ({ command: 'bash', scriptArgs: [p, ...a] }),
+    ps1: (p, a) => ({
+        command: 'powershell',
+        scriptArgs: ['-ExecutionPolicy', 'Bypass', '-File', p, ...a]
+    }),
+    bat: (p, a) => ({ command: 'cmd.exe', scriptArgs: ['/c', p, ...a] }),
+    cmd: (p, a) => ({ command: 'cmd.exe', scriptArgs: ['/c', p, ...a] })
+}
+
+function resolveScript(
+    ext: string | undefined,
+    absPath: string,
+    args: string[]
+): { command: string; scriptArgs: string[] } | null {
+    const runner = SCRIPT_RUNNERS[ext || '']
+    return runner ? runner(absPath, args) : null
+}
+
 export async function execScript(
     scriptPath: string,
     args: string[] = [],
@@ -691,51 +776,19 @@ export async function execScript(
     const absPath = resolve(scriptPath)
     const ext = absPath.split('.').pop()?.toLowerCase()
 
-    let command: string
-    let scriptArgs: string[]
-
-    switch (ext) {
-        case 'js':
-        case 'mjs':
-        case 'cjs':
-            command = 'node'
-            scriptArgs = [absPath, ...args]
-            break
-        case 'ts':
-        case 'mts':
-        case 'cts':
-            command = 'npx'
-            scriptArgs = ['tsx', absPath, ...args]
-            break
-        case 'py':
-            command = isWindows ? 'python' : 'python3'
-            scriptArgs = [absPath, ...args]
-            break
-        case 'sh':
-            command = 'bash'
-            scriptArgs = [absPath, ...args]
-            break
-        case 'ps1':
-            command = 'powershell'
-            scriptArgs = ['-ExecutionPolicy', 'Bypass', '-File', absPath, ...args]
-            break
-        case 'bat':
-        case 'cmd':
-            command = 'cmd.exe'
-            scriptArgs = ['/c', absPath, ...args]
-            break
-        default:
-            return {
-                success: false,
-                exitCode: -1,
-                stdout: '',
-                stderr: `不支持的脚本类型: ${ext}`,
-                duration: 0,
-                command: absPath
-            }
+    const resolved = resolveScript(ext, absPath, args)
+    if (!resolved) {
+        return {
+            success: false,
+            exitCode: -1,
+            stdout: '',
+            stderr: `不支持的脚本类型: ${ext}`,
+            duration: 0,
+            command: absPath
+        }
     }
 
-    return exec(command, scriptArgs, options)
+    return exec(resolved.command, resolved.scriptArgs, options)
 }
 
 // ==================== 包管理器命令 ====================
@@ -835,7 +888,10 @@ export async function crossCommand(
     }
 
     const mapped = commandMap[command]
-    const actualCommand = mapped ? (isWindows ? mapped.win : mapped.unix) : command
+    let actualCommand = command
+    if (mapped) {
+        actualCommand = isWindows ? mapped.win : mapped.unix
+    }
 
     return exec(actualCommand, args, options)
 }

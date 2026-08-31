@@ -1,8 +1,12 @@
 /**
  * 文件处理辅助函数
  *
- * 使用 fs-extra 封装常用的文件操作
- * 所有文件相关操作都从此模块导出
+ * 使用 fs-extra 封装常用的文件操作；所有文件相关操作都从此模块导出。
+ *
+ * 设计原则（与 http 封装一致）：
+ * - 稳定可靠：统一封装 fs 操作，正常执行与返回；异常统一收敛为 Result 结构。
+ * - 无事件监听、无拦截器/过滤器：只做「读/写/查/移动」这一件事。
+ * - 两套 API：直接抛错的命令式函数（readText 等）与返回 Result 的安全函数（*Result 等）。
  *
  * 规范：
  * 1. 所有 Node 模块使用 node:xxx 格式
@@ -624,9 +628,8 @@ export function getSafeRelativePath(from: string, to: string): string {
     return rel
 }
 
-// ==================== Result 包装的文件操作（来自 files.ts） ====================
+// ==================== Result 包装辅助 ====================
 
-// 类型定义
 interface FileInfo {
     path: string
     name: string
@@ -655,177 +658,125 @@ interface DirEntry {
 }
 
 /**
- * 读取文件（Result 包装）
+ * 统一把命令式操作收敛为 Result：成功返回 data，异常返回 { success:false, error }
  */
-export async function readFileResult(
-    path: string,
-    options?: { encoding?: BufferEncoding; startLine?: number; endLine?: number }
-): Promise<Result<string>> {
+async function withResult<R>(fn: () => Promise<R>, msg: string): Promise<Result<R>> {
     try {
-        if (options?.startLine || options?.endLine) {
-            const lines = await readLines(path, options.startLine, options.endLine)
-            return { success: true, data: lines.join('\n') }
-        }
-        const content = await readText(path, options?.encoding)
-        return { success: true, data: content }
+        return { success: true, data: await fn() }
     } catch (error) {
         return {
             success: false,
-            error: `读取文件失败: ${error instanceof Error ? error.message : String(error)}`
+            error: `${msg}: ${error instanceof Error ? error.message : String(error)}`
         }
     }
 }
 
+// ==================== 文件操作（Result 包装） ====================
+
 /**
- * 写入文件（Result 包装）
+ * 读取文件（Result 包装）。支持按行范围读取。
  */
-export async function writeFileResult(
+export function readFileResult(
+    path: string,
+    options?: { encoding?: BufferEncoding; startLine?: number; endLine?: number }
+): Promise<Result<string>> {
+    return withResult(async () => {
+        if (options?.startLine || options?.endLine) {
+            const lines = await readLines(path, options.startLine, options.endLine)
+            return lines.join('\n')
+        }
+        return readText(path, options?.encoding)
+    }, '读取文件失败')
+}
+
+/**
+ * 写入文件（Result 包装）。可选写前备份。
+ */
+export function writeFileResult(
     path: string,
     content: string,
     options?: { createBackup?: boolean }
 ): Promise<Result<void>> {
-    try {
+    return withResult(async () => {
         if (options?.createBackup && (await exists(path))) {
             await copyFile(path, `${path}.bak`)
         }
         await writeText(path, content)
-        return { success: true }
-    } catch (error) {
-        return {
-            success: false,
-            error: `写入文件失败: ${error instanceof Error ? error.message : String(error)}`
-        }
-    }
+    }, '写入文件失败')
 }
 
 /**
  * 追加文件（Result 包装）
  */
-export async function appendFileResult(path: string, content: string): Promise<Result<void>> {
-    try {
-        await appendText(path, content)
-        return { success: true }
-    } catch (error) {
-        return {
-            success: false,
-            error: `追加文件失败: ${error instanceof Error ? error.message : String(error)}`
-        }
-    }
+export function appendFileResult(path: string, content: string): Promise<Result<void>> {
+    return withResult(() => appendText(path, content), '追加文件失败')
 }
 
 /**
  * 创建文件（Result 包装）
  */
-export async function createFileResult(path: string, content: string = ''): Promise<Result<void>> {
-    try {
-        await writeText(path, content)
-        return { success: true }
-    } catch (error) {
-        return {
-            success: false,
-            error: `创建文件失败: ${error instanceof Error ? error.message : String(error)}`
-        }
-    }
+export function createFileResult(path: string, content: string = ''): Promise<Result<void>> {
+    return withResult(() => writeText(path, content), '创建文件失败')
 }
 
 /**
  * 删除文件（Result 包装）
  */
-export async function deleteFileResult(path: string): Promise<Result<void>> {
-    try {
-        await removeFile(path)
-        return { success: true }
-    } catch (error) {
-        return {
-            success: false,
-            error: `删除文件失败: ${error instanceof Error ? error.message : String(error)}`
-        }
-    }
+export function deleteFileResult(path: string): Promise<Result<void>> {
+    return withResult(() => removeFile(path), '删除文件失败')
 }
 
 /**
- * 复制文件（Result 包装）
+ * 复制文件（Result 包装）。不覆盖已存在目标（除非 overwrite=true）。
  */
-export async function copyFileResult(
+export function copyFileResult(
     src: string,
     dest: string,
     overwrite?: boolean
 ): Promise<Result<void>> {
-    try {
-        if (!overwrite && (await exists(dest))) {
-            return { success: false, error: '目标文件已存在' }
-        }
+    return withResult(async () => {
+        if (!overwrite && (await exists(dest))) throw new Error('目标文件已存在')
         await copyFile(src, dest)
-        return { success: true }
-    } catch (error) {
-        return {
-            success: false,
-            error: `复制文件失败: ${error instanceof Error ? error.message : String(error)}`
-        }
-    }
+    }, '复制文件失败')
 }
 
 /**
- * 移动文件（Result 包装）
+ * 移动文件（Result 包装）。不覆盖已存在目标（除非 overwrite=true）。
  */
-export async function moveFileResult(
+export function moveFileResult(
     src: string,
     dest: string,
     overwrite?: boolean
 ): Promise<Result<void>> {
-    try {
-        if (!overwrite && (await exists(dest))) {
-            return { success: false, error: '目标文件已存在' }
-        }
+    return withResult(async () => {
+        if (!overwrite && (await exists(dest))) throw new Error('目标文件已存在')
         await moveFile(src, dest)
-        return { success: true }
-    } catch (error) {
-        return {
-            success: false,
-            error: `移动文件失败: ${error instanceof Error ? error.message : String(error)}`
-        }
-    }
+    }, '移动文件失败')
 }
 
 /**
  * 检查存在（Result 包装）
  */
-export async function existsResult(path: string): Promise<Result<boolean>> {
-    try {
-        const result = await exists(path)
-        return { success: true, data: result }
-    } catch (error) {
-        return {
-            success: false,
-            error: `检查文件失败: ${error instanceof Error ? error.message : String(error)}`
-        }
-    }
+export function existsResult(path: string): Promise<Result<boolean>> {
+    return withResult(() => exists(path), '检查文件失败')
 }
 
 /**
  * 获取文件信息（Result 包装）
  */
-export async function getFileInfoResult(path: string): Promise<Result<FileInfo>> {
-    try {
+export function getFileInfoResult(path: string): Promise<Result<FileInfo>> {
+    return withResult(async () => {
         const info = await getFileInfo(path)
-        if (!info) return { success: false, error: '文件不存在' }
+        if (!info) throw new Error('文件不存在')
         return {
-            success: true,
-            data: {
-                path: info.path,
-                name: info.name,
-                size: info.size,
-                isFile: info.isFile,
-                isDirectory: info.isDirectory,
-                modified: info.modifiedAt
-            }
+            path: info.path,
+            name: info.name,
+            size: info.size,
+            isFile: info.isFile,
+            isDirectory: info.isDirectory,
+            modified: info.modifiedAt
         }
-    } catch (error) {
-        return {
-            success: false,
-            error: `获取文件信息失败: ${error instanceof Error ? error.message : String(error)}`
-        }
-    }
+    }, '获取文件信息失败')
 }
 
 // ==================== 目录操作（Result 包装） ====================
@@ -833,52 +784,28 @@ export async function getFileInfoResult(path: string): Promise<Result<FileInfo>>
 /**
  * 创建目录（Result 包装）
  */
-export async function createDirResult(path: string): Promise<Result<void>> {
-    try {
-        await createDir(path)
-        return { success: true }
-    } catch (error) {
-        return {
-            success: false,
-            error: `创建目录失败: ${error instanceof Error ? error.message : String(error)}`
-        }
-    }
+export function createDirResult(path: string): Promise<Result<void>> {
+    return withResult(() => createDir(path), '创建目录失败')
 }
 
 /**
  * 删除目录（Result 包装）
  */
-export async function removeDirResult(path: string): Promise<Result<void>> {
-    try {
-        await removeDir(path)
-        return { success: true }
-    } catch (error) {
-        return {
-            success: false,
-            error: `删除目录失败: ${error instanceof Error ? error.message : String(error)}`
-        }
-    }
+export function removeDirResult(path: string): Promise<Result<void>> {
+    return withResult(() => removeDir(path), '删除目录失败')
 }
 
 /**
  * 清空目录（Result 包装）
  */
-export async function cleanDirResult(path: string): Promise<Result<void>> {
-    try {
-        await emptyDir(path)
-        return { success: true }
-    } catch (error) {
-        return {
-            success: false,
-            error: `清空目录失败: ${error instanceof Error ? error.message : String(error)}`
-        }
-    }
+export function cleanDirResult(path: string): Promise<Result<void>> {
+    return withResult(() => emptyDir(path), '清空目录失败')
 }
 
 /**
  * 列出目录（Result 包装）
  */
-export async function listDirResult(
+export function listDirResult(
     path: string,
     options?: {
         recursive?: boolean
@@ -888,90 +815,95 @@ export async function listDirResult(
         fileTypes?: string[]
     }
 ): Promise<Result<DirEntry[]>> {
-    try {
+    return withResult(async () => {
         const entries = await readDirWithStats(path)
         let results: DirEntry[] = entries
 
         if (!options?.includeHidden) {
             results = results.filter((e) => !e.name.startsWith('.'))
         }
-
         if (options?.fileTypes && options.fileTypes.length > 0) {
-            results = results.filter((e) => {
-                if (e.isDirectory) return true
-                const ext = getExtension(e.name)
-                return options.fileTypes!.includes(ext)
-            })
+            results = results.filter(
+                (e) => e.isDirectory || options.fileTypes!.includes(getExtension(e.name))
+            )
         }
-
         if (options?.filter) {
             const pattern = new RegExp(options.filter.replace(/\*/g, '.*'), 'i')
             results = results.filter((e) => pattern.test(e.name))
         }
-
-        return { success: true, data: results }
-    } catch (error) {
-        return {
-            success: false,
-            error: `列出目录失败: ${error instanceof Error ? error.message : String(error)}`
-        }
-    }
+        return results
+    }, '列出目录失败')
 }
 
 /**
- * 复制目录（Result 包装）
+ * 复制目录（Result 包装）。不覆盖已存在目标（除非 overwrite=true）。
  */
-export async function copyDirResult(
+export function copyDirResult(
     src: string,
     dest: string,
     overwrite?: boolean
 ): Promise<Result<void>> {
-    try {
-        if (!overwrite && (await exists(dest))) {
-            return { success: false, error: '目标目录已存在' }
-        }
+    return withResult(async () => {
+        if (!overwrite && (await exists(dest))) throw new Error('目标目录已存在')
         await copyDir(src, dest)
-        return { success: true }
-    } catch (error) {
-        return {
-            success: false,
-            error: `复制目录失败: ${error instanceof Error ? error.message : String(error)}`
-        }
-    }
+    }, '复制目录失败')
 }
 
 /**
- * 获取目录大小（Result 包装）
+ * 递归计算目录大小（Result 包装）
  */
-export async function getDirSizeResult(path: string): Promise<Result<number>> {
-    try {
+export function getDirSizeResult(path: string): Promise<Result<number>> {
+    return withResult(async () => {
         const entries = await readDirWithStats(path)
         let totalSize = 0
         for (const entry of entries) {
             if (entry.isFile) {
                 totalSize += entry.size
             } else if (entry.isDirectory) {
-                const subResult = await getDirSizeResult(entry.path)
-                if (subResult.success && subResult.data) {
-                    totalSize += subResult.data
-                }
+                const sub = await getDirSizeResult(entry.path)
+                if (sub.success && sub.data) totalSize += sub.data
             }
         }
-        return { success: true, data: totalSize }
-    } catch (error) {
-        return {
-            success: false,
-            error: `获取目录大小失败: ${error instanceof Error ? error.message : String(error)}`
+        return totalSize
+    }, '获取目录大小失败')
+}
+
+// ==================== 搜索与替换操作 ====================
+
+function matchLines(content: string, regex: RegExp): SearchMatch[] {
+    const lines = content.split('\n')
+    const matches: SearchMatch[] = []
+    for (let i = 0; i < lines.length; i++) {
+        if (regex.test(lines[i])) {
+            matches.push({ line: i + 1, content: lines[i].trim() })
+        }
+        regex.lastIndex = 0
+    }
+    return matches
+}
+
+async function collectSearch(
+    dir: string,
+    options: { pattern: string; caseSensitive?: boolean; recursive?: boolean; maxResults?: number },
+    results: SearchResult[]
+): Promise<void> {
+    const entries = await readDirWithStats(dir)
+    const regex = new RegExp(options.pattern, options.caseSensitive ? 'g' : 'gi')
+    for (const entry of entries) {
+        if (results.length >= (options.maxResults ?? 1000)) return
+        if (entry.isFile && isTextFile(entry.path)) {
+            const matches = matchLines(await readText(entry.path), regex)
+            if (matches.length > 0) results.push({ file: entry.path, matches })
+        } else if (entry.isDirectory && options.recursive !== false) {
+            await collectSearch(entry.path, options, results)
         }
     }
 }
 
-// ==================== 搜索操作 ====================
-
 /**
- * 搜索文件内容
+ * 搜索文件内容（Result 包装）
  */
-export async function searchContent(
+export function searchContent(
     dirPath: string,
     options: {
         pattern: string
@@ -981,88 +913,52 @@ export async function searchContent(
         contextLines?: number
     }
 ): Promise<Result<SearchResult[]>> {
-    try {
+    return withResult(async () => {
         const results: SearchResult[] = []
-        const regex = new RegExp(options.pattern, options.caseSensitive ? 'g' : 'gi')
+        await collectSearch(dirPath, options, results)
+        return results
+    }, '搜索失败')
+}
 
-        const searchDir = async (dir: string): Promise<void> => {
-            const entries = await readDirWithStats(dir)
-            for (const entry of entries) {
-                if (results.length >= (options.maxResults || 1000)) return
-
-                if (entry.isFile && isTextFile(entry.path)) {
-                    const content = await readText(entry.path)
-                    const lines = content.split('\n')
-                    const matches: SearchMatch[] = []
-
-                    for (let i = 0; i < lines.length; i++) {
-                        if (regex.test(lines[i])) {
-                            matches.push({ line: i + 1, content: lines[i].trim() })
-                        }
-                        regex.lastIndex = 0
-                    }
-
-                    if (matches.length > 0) {
-                        results.push({ file: entry.path, matches })
-                    }
-                } else if (entry.isDirectory && options.recursive !== false) {
-                    await searchDir(entry.path)
-                }
+async function collectFileMatches(
+    dir: string,
+    regex: RegExp,
+    fileTypes: string[] | undefined,
+    results: Array<{ path: string; name: string }>,
+    recursive = true
+): Promise<void> {
+    const entries = await readDirWithStats(dir)
+    for (const entry of entries) {
+        if (entry.isFile && regex.test(entry.name)) {
+            if (!fileTypes || fileTypes.includes(getExtension(entry.name))) {
+                results.push({ path: entry.path, name: entry.name })
             }
-        }
-
-        await searchDir(dirPath)
-        return { success: true, data: results }
-    } catch (error) {
-        return {
-            success: false,
-            error: `搜索失败: ${error instanceof Error ? error.message : String(error)}`
+        } else if (entry.isDirectory && recursive) {
+            await collectFileMatches(entry.path, regex, fileTypes, results, recursive)
         }
     }
 }
 
 /**
- * 搜索文件
+ * 按名称搜索文件（Result 包装）
  */
-export async function searchFiles(
+export function searchFiles(
     dirPath: string,
     pattern: string,
     options?: { recursive?: boolean; fileTypes?: string[] }
 ): Promise<Result<Array<{ path: string; name: string }>>> {
-    try {
+    return withResult(async () => {
         const results: Array<{ path: string; name: string }> = []
         const regex = new RegExp(pattern.replace(/\*/g, '.*'), 'i')
-
-        const searchDir = async (dir: string): Promise<void> => {
-            const entries = await readDirWithStats(dir)
-            for (const entry of entries) {
-                if (entry.isFile && regex.test(entry.name)) {
-                    if (
-                        !options?.fileTypes ||
-                        options.fileTypes.includes(getExtension(entry.name))
-                    ) {
-                        results.push({ path: entry.path, name: entry.name })
-                    }
-                } else if (entry.isDirectory && options?.recursive !== false) {
-                    await searchDir(entry.path)
-                }
-            }
-        }
-
-        await searchDir(dirPath)
-        return { success: true, data: results }
-    } catch (error) {
-        return {
-            success: false,
-            error: `搜索文件失败: ${error instanceof Error ? error.message : String(error)}`
-        }
-    }
+        await collectFileMatches(dirPath, regex, options?.fileTypes, results)
+        return results
+    }, '搜索文件失败')
 }
 
 /**
- * 替换文件内容
+ * 替换单个文件内容（Result 包装）
  */
-export async function replaceContent(
+export function replaceContent(
     filePath: string,
     options: {
         pattern: string
@@ -1072,33 +968,24 @@ export async function replaceContent(
         dryRun?: boolean
     }
 ): Promise<Result<{ replacements: number }>> {
-    try {
+    return withResult(async () => {
         const content = await readText(filePath)
         const regex = new RegExp(options.pattern, options.caseSensitive ? 'g' : 'gi')
         const matches = content.match(regex)
         const replacements = matches ? matches.length : 0
 
         if (!options.dryRun && replacements > 0) {
-            if (options.createBackup) {
-                await copyFile(filePath, `${filePath}.bak`)
-            }
-            const newContent = content.replace(regex, options.replacement)
-            await writeText(filePath, newContent)
+            if (options.createBackup) await copyFile(filePath, `${filePath}.bak`)
+            await writeText(filePath, content.replace(regex, options.replacement))
         }
-
-        return { success: true, data: { replacements } }
-    } catch (error) {
-        return {
-            success: false,
-            error: `替换失败: ${error instanceof Error ? error.message : String(error)}`
-        }
-    }
+        return { replacements }
+    }, '替换失败')
 }
 
 /**
- * 批量替换文件内容
+ * 批量替换目录下文件内容（Result 包装）
  */
-export async function replaceInFiles(
+export function replaceInFiles(
     dirPath: string,
     options: {
         pattern: string
@@ -1108,14 +995,12 @@ export async function replaceInFiles(
         dryRun?: boolean
     }
 ): Promise<Result<{ files: number; replacements: number }>> {
-    try {
+    return withResult(async () => {
         let totalFiles = 0
         let totalReplacements = 0
 
         const filesResult = await searchFiles(dirPath, options.filePattern || '*')
-        if (!filesResult.success || !filesResult.data) {
-            return { success: false, error: filesResult.error }
-        }
+        if (!filesResult.success || !filesResult.data) throw new Error(filesResult.error)
 
         for (const f of filesResult.data) {
             const result = await replaceContent(f.path, {
@@ -1129,102 +1014,76 @@ export async function replaceInFiles(
                 totalReplacements += result.data.replacements
             }
         }
-
-        return { success: true, data: { files: totalFiles, replacements: totalReplacements } }
-    } catch (error) {
-        return {
-            success: false,
-            error: `批量替换失败: ${error instanceof Error ? error.message : String(error)}`
-        }
-    }
+        return { files: totalFiles, replacements: totalReplacements }
+    }, '批量替换失败')
 }
 
 // ==================== 批量操作 ====================
 
 /**
- * 批量创建文件
+ * 批量创建文件（Result 包装）
  */
-export async function batchCreate(
+export function batchCreate(
     files: Array<{ path: string; content?: string }>
 ): Promise<Result<{ created: number }>> {
-    try {
+    return withResult(async () => {
         let created = 0
         for (const f of files) {
             await writeText(f.path, f.content || '')
             created++
         }
-        return { success: true, data: { created } }
-    } catch (error) {
-        return {
-            success: false,
-            error: `批量创建失败: ${error instanceof Error ? error.message : String(error)}`
-        }
-    }
+        return { created }
+    }, '批量创建失败')
 }
 
 /**
- * 批量删除文件
+ * 批量删除文件（Result 包装）
  */
-export async function batchDelete(paths: string[]): Promise<Result<{ deleted: number }>> {
-    try {
+export function batchDelete(paths: string[]): Promise<Result<{ deleted: number }>> {
+    return withResult(async () => {
         let deleted = 0
         for (const p of paths) {
             await removeFile(p)
             deleted++
         }
-        return { success: true, data: { deleted } }
-    } catch (error) {
-        return {
-            success: false,
-            error: `批量删除失败: ${error instanceof Error ? error.message : String(error)}`
-        }
-    }
+        return { deleted }
+    }, '批量删除失败')
 }
 
 /**
- * 批量复制文件
+ * 批量复制文件（Result 包装）
  */
-export async function batchCopy(
+export function batchCopy(
     files: Array<{ src: string; dest: string }>,
     overwrite?: boolean
 ): Promise<Result<{ copied: number }>> {
-    try {
+    return withResult(async () => {
         let copied = 0
         for (const f of files) {
             if (!overwrite && (await exists(f.dest))) continue
             await copyFile(f.src, f.dest)
             copied++
         }
-        return { success: true, data: { copied } }
-    } catch (error) {
-        return {
-            success: false,
-            error: `批量复制失败: ${error instanceof Error ? error.message : String(error)}`
-        }
-    }
+        return { copied }
+    }, '批量复制失败')
 }
 
 /**
- * 批量移动文件
+ * 批量移动文件（Result 包装）
  */
-export async function batchMove(
+export function batchMove(
     files: Array<{ src: string; dest: string }>,
     overwrite?: boolean
 ): Promise<Result<{ moved: number }>> {
-    try {
+    return withResult(async () => {
         let moved = 0
         for (const f of files) {
             if (!overwrite && (await exists(f.dest))) continue
             await moveFile(f.src, f.dest)
             moved++
         }
-        return { success: true, data: { moved } }
-    } catch (error) {
-        return {
-            success: false,
-            error: `批量移动失败: ${error instanceof Error ? error.message : String(error)}`
-        }
-    }
+        return { moved }
+    }, '批量移动失败')
 }
 
 // ==================== 重新导出 fs-extra 常用函数 ====================

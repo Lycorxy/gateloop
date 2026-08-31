@@ -137,19 +137,27 @@ async function formatFileWithPrettier(
 
     try {
         const originalContent = await readText(filePath)
-        const args: string[] = []
-        if (config.prettierConfigPath) args.push('--config', config.prettierConfigPath)
-        if (options.write) args.push('--write')
-        args.push(resolve(filePath))
-
-        await exec(prettierPath, args, { cwd: config.rootDir, timeout: 30000 })
 
         if (options.write) {
+            const args: string[] = []
+            if (config.prettierConfigPath) args.push('--config', config.prettierConfigPath)
+            args.push('--write', resolve(filePath))
+            await exec(prettierPath, args, { cwd: config.rootDir, timeout: 30000 })
             const newContent = await readText(filePath)
             result.formatted = newContent
             result.changed = originalContent !== newContent
         } else {
+            // 非写入模式：用 prettier --check 的退出码权威判定是否需要格式化，
+            // 避免直接比较 stdout 时因 cleanOutput 归一化（去空行/去 ANSI）导致误判。
+            const checkArgs: string[] = ['--check']
+            if (config.prettierConfigPath) checkArgs.push('--config', config.prettierConfigPath)
+            checkArgs.push(resolve(filePath))
+            const checkProc = await exec(prettierPath, checkArgs, {
+                cwd: config.rootDir,
+                timeout: 30000
+            })
             result.formatted = originalContent
+            result.changed = checkProc.exitCode !== 0
         }
     } catch (error) {
         result.errors.push(`Prettier 格式化失败: ${error}`)

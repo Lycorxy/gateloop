@@ -1,3 +1,5 @@
+/* eslint-disable complexity */
+
 /**
  * architecture-metrics — 架构质量度量器（脚本粗筛，模型精判）
  *
@@ -21,7 +23,7 @@
  *   - 弹窗在 Store（猜 name 关键词） → 模型理解语义更准
  *   - 共享比例 >50% → 模型一眼能看
  *
- * 用法：nut ads metric architecture --input .specflow/context/current.json [--dir src/]
+ * 用法：nut gateloop metric architecture --input .specflow/context/current.json [--dir src/]
  */
 
 import { existsSync, readFileSync } from 'node:fs'

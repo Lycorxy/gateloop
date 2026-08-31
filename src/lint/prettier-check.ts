@@ -2,7 +2,7 @@
  * Prettier 格式化验证器 — 独立于 ESLint 的 prettier 插件
  *
  * 直接跑 prettier --check，即使 ESLint 没配 prettier/prettier 规则也能检查。
- * 接入 ADS verify 后，nut ads next 强制执行。
+ * 接入 GateLoop verify 后，nut gateloop next 强制执行。
  */
 
 import { join } from 'node:path'

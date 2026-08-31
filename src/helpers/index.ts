@@ -329,3 +329,45 @@ export {
     uuid as generateUuid,
     shortId
 } from './string'
+
+// ==================== HTTP/HTTPS 请求 ====================
+export {
+    // 核心方法
+    request,
+    // 统一门面
+    http,
+    // 便捷方法
+    httpGet,
+    httpPost,
+    httpPut,
+    httpPatch,
+    httpDelete,
+    httpHead,
+    httpOptions,
+    // 错误
+    HttpError,
+    // 类型
+    type HttpMethod,
+    type HttpRequestOptions,
+    type HttpResponse,
+    type HttpResponseType,
+    type HttpRetryOptions
+} from './http'
+
+// ==================== 代码格式化 ====================
+export {
+    detectFormatConfig,
+    formatFile,
+    formatFiles,
+    EXT_TO_PARSER,
+    ESLINT_EXTENSIONS,
+    PRETTIER_EXTENSIONS
+} from '../format'
+
+export type {
+    FormatterType,
+    FormatOptions,
+    FormatResult,
+    BatchFormatResult,
+    ProjectFormatConfig
+} from '../format'

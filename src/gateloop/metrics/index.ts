@@ -1,12 +1,12 @@
 /**
- * ADS Metric — 客观度量入口
+ * GateLoop Metric — 客观度量入口
  *
  * 哲学：脚本只陈述客观事实（度量），不判定好坏（主观）。
  *   度量脚本输出 JSON 报告 → 引擎 verifyResult 回灌给模型
  *   模型基于事实自主决策是否优化
  *
  * 用法：
- *   nut ads metric <type> [options]
+ *   nut gateloop metric <type> [options]
  *
  * 子命令：
  *   design              度量 frontendPlan 客观指标（组件数/状态数/依赖路径）

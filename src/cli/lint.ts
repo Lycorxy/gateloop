@@ -6,7 +6,14 @@
 
 import { existsSync, statSync } from 'node:fs'
 import type { RuleSource, GenerateKnowledgeInput, LintInput, FixInput } from '../lint/types'
-import { extractAllRules, generateKnowledgeBase, runLint as runLintEngine, fixLint, detectLintConfig, checkFileNaming } from '../lint'
+import {
+    extractAllRules,
+    generateKnowledgeBase,
+    runLint as runLintEngine,
+    fixLint,
+    detectLintConfig,
+    checkFileNaming
+} from '../lint'
 
 // ==================== 主函数 ====================
 
@@ -154,14 +161,20 @@ async function handleRun(args: string[]) {
             console.log(`\n${fileResult.filePath}`)
             for (const issue of fileResult.issues) {
                 const sev = issue.severity === 'error' ? 'error' : 'warning'
-                console.log(`  ${issue.line}:${issue.column}  ${issue.ruleName}  ${sev}  ${issue.message}`)
+                console.log(
+                    `  ${issue.line}:${issue.column}  ${issue.ruleName}  ${sev}  ${issue.message}`
+                )
             }
         }
     }
 
-    console.log(`\n✖ ${result.totalIssues} problems (${result.totalErrors} errors, ${result.totalWarnings} warnings)`)
+    console.log(
+        `\n✖ ${result.totalIssues} problems (${result.totalErrors} errors, ${result.totalWarnings} warnings)`
+    )
     if (result.fixableIssues > 0) {
-        console.log(`  ${result.fixableIssues} errors and ${result.fixableIssues} warnings potentially fixable with \`nut lint fix\` command`)
+        console.log(
+            `  ${result.fixableIssues} errors and ${result.fixableIssues} warnings potentially fixable with \`nut lint fix\` command`
+        )
     }
 
     console.log('\n✅ 验证完成')
@@ -226,12 +239,16 @@ async function handleFix(args: string[]) {
                 console.log(`\n${fileResult.filePath}`)
                 for (const issue of fileResult.issues) {
                     const sev = issue.severity === 'error' ? 'error' : 'warning'
-                    console.log(`  ${issue.line}:${issue.column}  ${issue.ruleName}  ${sev}  ${issue.message}`)
+                    console.log(
+                        `  ${issue.line}:${issue.column}  ${issue.ruleName}  ${sev}  ${issue.message}`
+                    )
                 }
             }
         }
 
-        console.log(`\n✖ ${verifyResult.totalIssues} problems (${verifyResult.totalErrors} errors, ${verifyResult.totalWarnings} warnings)`)
+        console.log(
+            `\n✖ ${verifyResult.totalIssues} problems (${verifyResult.totalErrors} errors, ${verifyResult.totalWarnings} warnings)`
+        )
     } else {
         console.log('\n✅ 所有问题已修复')
     }
@@ -288,7 +305,7 @@ function parseOptions(args: string[]): Record<string, string> {
             const next = args[i + 1]
             // 下一个是 --xxx 或不存在 → 当前是 flag（boolean）
             // 否则 next 是值
-            const value = (!next || next.startsWith('--')) ? 'true' : next
+            const value = !next || next.startsWith('--') ? 'true' : next
             options[key] = value
             if (value !== 'true') i++
         } else {
@@ -355,8 +372,8 @@ function handleCheckNaming(args: string[]) {
         process.exit(1)
     }
 
-    const expanded = expandPatterns(patterns).filter(p =>
-        /\.(ts|tsx|js|jsx)$/.test(p) || p.includes('*')
+    const expanded = expandPatterns(patterns).filter(
+        (p) => /\.(ts|tsx|js|jsx)$/.test(p) || p.includes('*')
     )
 
     if (expanded.length === 0) {

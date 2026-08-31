@@ -8,7 +8,7 @@
  * 删减说明（v2）：
  *   - 文件 >360 行 → fileSize 已校验，删除
  *
- * 用法：nut ads metric code --dir src/
+ * 用法：nut gateloop metric code --dir src/
  */
 
 import { readFileSync } from 'node:fs'

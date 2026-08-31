@@ -1,10 +1,10 @@
 ---
 name: frontend-codegen
 description: >
-  前端代码生成唯一入口。由 ADS harness 驱动，编排 frontend-design（设计）+
+  前端代码生成唯一入口。由 GateLoop harness 驱动，编排 frontend-design（设计）+
   code-quality-guard（规则+验证）+ css-style-writer（样式）。
   引擎强制验证（exit code），模型无法跳步或谎报通过。
-  规则由 ADS reads + rulesInline 内联，不依赖 specflow-rules-engine。
+  规则由 GateLoop reads + rulesInline 内联，不依赖 specflow-rules-engine。
   通用独立 skill，不绑定特定设计稿来源。
 version: 12.1.0
 dependencies: []
@@ -13,12 +13,12 @@ allowed-tools:
 max-token: 8000
 ---
 
-# Frontend Codegen v13 — ADS Harness 驱动（3 阶段 + 客观输入防伪）
+# Frontend Codegen v13 — GateLoop Harness 驱动（3 阶段 + 客观输入防伪）
 
 > v13 核心变更：新增 inventory anchor（客观输入先行 + 集合闭包防伪）。
 > 脚本枚举违规文件 → design 必须覆盖 → code 末尾重跑断言清零，模型无法"只处理部分文件糊弄过关"。
 > v12 核心变更：从 4 anchor 精简为 2 anchor（design → code），消除验证冗余。
-> rules anchor 已删除（规则注入由 ADS reads 自动完成）。
+> rules anchor 已删除（规则注入由 GateLoop reads 自动完成）。
 > verify anchor 已合并到 code anchor（避免 tsc+lint 重跑两遍）。
 
 ## 架构演进
@@ -33,23 +33,23 @@ design→rules→code→verify  design → code            inventory → design 
 ```
 
 **为什么删除 rules anchor？**
-规则注入由 ADS `reads` → `rulesInline` 自动完成，不需要一个 anchor 来"检查 quick-ref.md 是否存在"。规则提取是一次性操作，合并到 code anchor 的前置步骤即可。
+规则注入由 GateLoop `reads` → `rulesInline` 自动完成，不需要一个 anchor 来"检查 quick-ref.md 是否存在"。规则提取是一次性操作，合并到 code anchor 的前置步骤即可。
 
 **为什么合并 verify 到 code？**
 code anchor 的 verify 已经跑了 tsc+lint。verify anchor 又跑 tsc+lint+build，tsc+lint 完全重复。合并后 code anchor 的 verify 直接是 tsc+lint+build，一步到位（stylelint 按需触发，仅项目有配置时跑）。
 
 ---
 
-## ADS Harness 驱动模式
+## GateLoop Harness 驱动模式
 
 ```
-用户调用 nut ads init → 引擎返回 inventory anchor 指令
+用户调用 nut gateloop init → 引擎返回 inventory anchor 指令
   ↓
-inventory anchor: 脚本产出 inventory.json（违规清单）→ autoEmit → nut ads next → 引擎校验产物+emit
+inventory anchor: 脚本产出 inventory.json（违规清单）→ autoEmit → nut gateloop next → 引擎校验产物+emit
   ↓
-design anchor: 消费 inventory → 设计 + coverage(覆盖violations) → emit frontendPlan → nut ads next → 引擎 schema + verify-coverage 集合闭包
+design anchor: 消费 inventory → 设计 + coverage(覆盖violations) → emit frontendPlan → nut gateloop next → 引擎 schema + verify-coverage 集合闭包
   ↓
-code anchor: 规则就绪 → 编码(处理coverage.targets) → fix --write → nut ads next → 引擎跑 tsc+lint+build + verify-completion 重跑清零
+code anchor: 规则就绪 → 编码(处理coverage.targets) → fix --write → nut gateloop next → 引擎跑 tsc+lint+build + verify-completion 重跑清零
   ↓
 done
 ```
@@ -60,13 +60,13 @@ done
 MANIFEST=.codebuddy/skills/frontend-codegen/anchor.config.json
 
 # 1. 初始化任务
-nut ads init $MANIFEST --task "实现用户列表页"
+nut gateloop init $MANIFEST --task "实现用户列表页"
 
 # 2. 引擎返回 inventory anchor 指令（客观，模型不参与判断）：
 #    - produceScripts 跑 inventory.mjs 产出 inventory.json（违规清单）
 #    - autoEmit 自动产出 inventory artifact
 #    - 模型无需操作，直接推进：
-nut ads next $MANIFEST
+nut gateloop next $MANIFEST
 
 # 3. 引擎校验 inventory 产出 + emit → 推进到 design anchor：
 #    - brief: 设计目标（coverage 必须覆盖 inventory.violations）
@@ -76,7 +76,7 @@ nut ads next $MANIFEST
 #    - emits: frontendPlan
 #
 #    模型执行设计（coverage.targets 覆盖全部 violations）→ 写 current.json → emit → 推进：
-nut ads next $MANIFEST
+nut gateloop next $MANIFEST
 
 # 4. 引擎 schema 校验 frontendPlan（4 张表 + coverage）+ verify-coverage 集合闭包：
 #    通过 → 推进到 code anchor
@@ -87,11 +87,11 @@ nut ads next $MANIFEST
 #    - requiresSubtasks: true
 #
 #    模型执行：规则就绪 → 拆子任务 → 编码（处理 coverage.targets）→ fix --write → 推进：
-nut ads next $MANIFEST
+nut gateloop next $MANIFEST
 
 # 6. 引擎强制重跑 tsc + lint + build + verify-completion（重跑 inventory 断言清零）：
 #    全绿 → done=true，任务完成
-#    有错误 → 返回 errors，模型修复后重新 nut ads next
+#    有错误 → 返回 errors，模型修复后重新 nut gateloop next
 ```
 
 ### 3 个 Anchor
@@ -106,10 +106,10 @@ nut ads next $MANIFEST
 
 1. **读指令** — `rulesInline`（已内联规则）+ `artifactsInline`（已内联上游数据）
 2. **执行核心逻辑** — 按规则和数据做事，产出文件 + emit artifact
-3. **推进** — 调 `nut ads next`，引擎强制验证，通过才推进
+3. **推进** — 调 `nut gateloop next`，引擎强制验证，通过才推进
 
 ⚠️ **不要自己声称"验证通过"**，引擎会重跑验证，exit code 说了算。
-⚠️ **连续失败超 maxAttempts → 熔断**，需人工介入或 `nut ads retry`。
+⚠️ **连续失败超 maxAttempts → 熔断**，需人工介入或 `nut gateloop retry`。
 
 ---
 
@@ -118,7 +118,7 @@ nut ads next $MANIFEST
 ### 铁律 1：代码生成 = 检测 + 修复 + 0错误
 
 ```
-ADS code anchor verify 强制执行 tsc + lint + build（stylelint 按需触发，仅项目有配置时跑），exit 0 才推进。
+GateLoop code anchor verify 强制执行 tsc + lint + build（stylelint 按需触发，仅项目有配置时跑），exit 0 才推进。
 禁止：留 ERROR 交付 / 把检测当可选。
 
 🔴 tsc 通过 ≠ lint 通过：
@@ -151,7 +151,7 @@ ADS code anchor verify 强制执行 tsc + lint + build（stylelint 按需触发�
 ### 铁律 3：文件规模与圈复杂度（地板 + 逃生口）
 
 ```
-ADS code anchor verify 强制执行 tsc + lint + build + fileSize + prettier（stylelint 按需触发），exit 0 才推进。
+GateLoop code anchor verify 强制执行 tsc + lint + build + fileSize + prettier（stylelint 按需触发），exit 0 才推进。
 
 圈复杂度规则（地板，带逃生口）：
   圈复杂度 ≤ 10 / 函数 ≤ 25 行 / 文件 ≤ 360 行 → PASS
@@ -259,12 +259,12 @@ code anchor verify 分两层：
 
 **产出 artifact：**
 ```bash
-nut ads emit $MANIFEST --key frontendPlan --kind file --path .specflow/context/current.json
+nut gateloop emit $MANIFEST --key frontendPlan --kind file --path .specflow/context/current.json
 ```
 
 **推进（引擎校验 schema → 通过推进到 code）：**
 ```bash
-nut ads next $MANIFEST
+nut gateloop next $MANIFEST
 ```
 
 🔴 frontendPlan 必须包含 4 张表：functionOwnership / stateClassification / efficiencyAudit / moduleBoundary
@@ -295,12 +295,12 @@ npx nut lint knowledge --source stylelint --rules all --overwrite true --outputD
 
 ```bash
 # 按组件/模块拆子任务
-nut ads subtask-add $MANIFEST --desc "实现列表组件"
-nut ads subtask-add $MANIFEST --desc "实现详情组件"
-nut ads subtask-add $MANIFEST --desc "实现筛选栏"
+nut gateloop subtask-add $MANIFEST --desc "实现列表组件"
+nut gateloop subtask-add $MANIFEST --desc "实现详情组件"
+nut gateloop subtask-add $MANIFEST --desc "实现筛选栏"
 
 # 逐个完成
-nut ads subtask-done $MANIFEST --id design-sub-1
+nut gateloop subtask-done $MANIFEST --id design-sub-1
 ```
 
 🔴 子任务未全部完成 → 引擎拒绝推进
@@ -357,12 +357,12 @@ fix --write → run
 #### 步骤 5：推进（引擎跑 tsc + lint + build，exit 0 才完成）
 
 ```bash
-nut ads next $MANIFEST
+nut gateloop next $MANIFEST
 ```
 
 ⚠️ 引擎会**强制重跑** tsc + lint + build（stylelint 按需触发，仅项目有配置时跑），不要自己声称"验证通过"。
 ⚠️ producesFresh 校验：产物文件 mtime 必须晚于阶段开始时间（防复用旧文件）。
-⚠️ 连续失败 8 次 → 熔断，需 `nut ads retry` 或人工介入。
+⚠️ 连续失败 8 次 → 熔断，需 `nut gateloop retry` 或人工介入。
 
 ---
 
@@ -419,11 +419,11 @@ PowerShell CLIXML 噪声规避：
 
 | 场景 | 处理 |
 |------|------|
-| nut ads next 返回 errors | 按 errors 修复代码 → 重新 nut ads next |
-| 熔断（escalated） | nut ads retry 刷新 fresh 基准 → 重新编码 → next |
-| 断线恢复 | nut ads status 查看当前 anchor → 从断点继续 |
-| 子任务未完成 | nut ads subtask-done 逐个完成 → 再 next |
-| artifact 缺失 | nut ads emit 产出 → 再 next |
+| nut gateloop next 返回 errors | 按 errors 修复代码 → 重新 nut gateloop next |
+| 熔断（escalated） | nut gateloop retry 刷新 fresh 基准 → 重新编码 → next |
+| 断线恢复 | nut gateloop status 查看当前 anchor → 从断点继续 |
+| 子任务未完成 | nut gateloop subtask-done 逐个完成 → 再 next |
+| artifact 缺失 | nut gateloop emit 产出 → 再 next |
 | 文件超限 | 必须拆分 |
 | 圈复杂度超标 | 必须拆分函数 |
 | 5维度约束不通过 | 标记具体维度，修复后重检 |
@@ -434,8 +434,8 @@ PowerShell CLIXML 噪声规避：
 
 | 文件 | 内容 | 加载方式 |
 |------|------|---------|
-| `anchor.config.json` | ADS harness 配置（2 anchor + verify） | nut ads init/next 读取 |
-| `RULE.mdc` | 前端代码生成铁律（ADS reads 内联） | code anchor rulesInline |
+| `anchor.config.json` | GateLoop harness 配置（2 anchor + verify） | nut gateloop init/next 读取 |
+| `RULE.mdc` | 前端代码生成铁律（GateLoop reads 内联） | code anchor rulesInline |
 | `rules/iron-rules.md` | 铁律详细规范 | 按需 read_file |
 | `rules/file-structure.md` | 文件结构规范 | 按需 read_file |
 | `rules/anti-patterns.md` | 反模式清单 | 按需 read_file |

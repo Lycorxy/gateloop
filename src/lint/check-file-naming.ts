@@ -7,10 +7,10 @@
  *   3. Hook 文件命名 use-xxx.ts
  *   4. PascalCase 组件名与文件名对应（UserList.tsx ↔ user-list.tsx）
  *
- * 接入 ADS verify custom 后，nut ads next 强制执行。
+ * 接入 GateLoop verify custom 后，nut gateloop next 强制执行。
  * 用法：nut lint check-naming "src/**\/*.{ts,tsx}"
  *       或作为库导入：import { checkFileNaming } from './check-file-naming'
-**/
+ **/
 
 import { readFileSync } from 'node:fs'
 import { basename, extname, dirname } from 'node:path'
@@ -31,11 +31,7 @@ export interface NamingConfig {
 
 export interface NamingViolation {
     file: string
-    type:
-        | 'file-name-case'
-        | 'multi-export'
-        | 'hook-naming'
-        | 'component-file-mismatch'
+    type: 'file-name-case' | 'multi-export' | 'hook-naming' | 'component-file-mismatch'
     actual: string
     expected: string
     message: string
@@ -100,49 +96,8 @@ export function checkFileNaming(
         for (const filePath of files) {
             const ext = extname(filePath).slice(1)
             if (!['ts', 'tsx', 'js', 'jsx'].includes(ext)) continue
-
             checkedFiles++
-            const relPath = filePath.replace(cwd, '').replace(/^[\\/]/, '').replace(/\\/g, '/')
-            const fileName = basename(filePath, `.${ext}`)
-            const dirName = basename(dirname(filePath))
-
-            // 1. 文件名 kebab-case 检查
-            const fileViolation = checkFileNameCase(fileName, relPath, cfg)
-            if (fileViolation) violations.push(fileViolation)
-
-            // 仅 .tsx/.jsx 检查组件相关
-            if (ext === 'tsx' || ext === 'jsx') {
-                let content = ''
-                try {
-                    content = readFileSync(filePath, 'utf-8')
-                } catch {
-                    continue
-                }
-
-                // 2. 一个文件一个导出组件
-                if (cfg.checkSingleExport) {
-                    const exportViolation = checkSingleExport(content, relPath)
-                    if (exportViolation) violations.push(exportViolation)
-                }
-
-                // 3. PascalCase 组件名与文件名对应
-                if (cfg.checkComponentFileMatch && !cfg.allowExceptionNames.includes(fileName)) {
-                    const matchViolation = checkComponentFileMatch(content, fileName, relPath)
-                    if (matchViolation) violations.push(matchViolation)
-                }
-            }
-
-            // 4. Hook 文件命名 use-xxx.ts
-            if (cfg.checkHookNaming && (ext === 'ts' || ext === 'tsx')) {
-                let content = ''
-                try {
-                    content = readFileSync(filePath, 'utf-8')
-                } catch {
-                    continue
-                }
-                const hookViolation = checkHookFileNaming(content, fileName, relPath, dirName)
-                if (hookViolation) violations.push(hookViolation)
-            }
+            violations.push(...checkFileContent(filePath, cfg, cwd))
         }
     }
 
@@ -151,6 +106,78 @@ export function checkFileNaming(
         violations,
         checkedFiles
     }
+}
+
+/** 安全读取文件内容，失败返回 null */
+function readFileSafe(filePath: string): string | null {
+    try {
+        return readFileSync(filePath, 'utf-8')
+    } catch {
+        return null
+    }
+}
+
+/** 检查单个文件（已确保为 ts/tsx/js/jsx）的命名规范 */
+function checkTsxFile(
+    filePath: string,
+    cfg: Required<NamingConfig>,
+    relPath: string,
+    fileName: string
+): NamingViolation[] {
+    const violations: NamingViolation[] = []
+    const content = readFileSafe(filePath)
+    if (content === null) return violations
+    if (cfg.checkSingleExport) {
+        const exportViolation = checkSingleExport(content, relPath)
+        if (exportViolation) violations.push(exportViolation)
+    }
+    if (cfg.checkComponentFileMatch && !cfg.allowExceptionNames.includes(fileName)) {
+        const matchViolation = checkComponentFileMatch(content, fileName, relPath)
+        if (matchViolation) violations.push(matchViolation)
+    }
+    return violations
+}
+
+function checkHookFile(
+    filePath: string,
+    relPath: string,
+    fileName: string,
+    dirName: string
+): NamingViolation[] {
+    const violations: NamingViolation[] = []
+    const content = readFileSafe(filePath)
+    if (content === null) return violations
+    const hookViolation = checkHookFileNaming(content, fileName, relPath, dirName)
+    if (hookViolation) violations.push(hookViolation)
+    return violations
+}
+
+function checkFileContent(
+    filePath: string,
+    cfg: Required<NamingConfig>,
+    cwd: string
+): NamingViolation[] {
+    const violations: NamingViolation[] = []
+    const ext = extname(filePath).slice(1)
+    const relPath = filePath
+        .replace(cwd, '')
+        .replace(/^[\\/]/, '')
+        .replace(/\\/g, '/')
+    const fileName = basename(filePath, `.${ext}`)
+    const dirName = basename(dirname(filePath))
+
+    const fileViolation = checkFileNameCase(fileName, relPath, cfg)
+    if (fileViolation) violations.push(fileViolation)
+
+    if (ext === 'tsx' || ext === 'jsx') {
+        violations.push(...checkTsxFile(filePath, cfg, relPath, fileName))
+    }
+
+    if (cfg.checkHookNaming && (ext === 'ts' || ext === 'tsx')) {
+        violations.push(...checkHookFile(filePath, relPath, fileName, dirName))
+    }
+
+    return violations
 }
 
 // ==================== 检查逻辑 ====================
@@ -251,7 +278,8 @@ function checkHookFileNaming(
     dirName: string
 ): NamingViolation | null {
     // 提取所有 useXxx 导出（use 开头 + 大写字母）
-    const hookExports = content.match(/(?:export\s+(?:const|function)\s+)(use[A-Z][a-zA-Z0-9]*)/g) || []
+    const hookExports =
+        content.match(/(?:export\s+(?:const|function)\s+)(use[A-Z][a-zA-Z0-9]*)/g) || []
     if (hookExports.length === 0) return null
 
     // 已是 use-xxx.ts 形式 → PASS

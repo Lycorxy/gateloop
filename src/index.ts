@@ -5,7 +5,6 @@
  */
 
 export * from './helpers'
-export * from './git'
 export * from './format'
 export * from './lint'
-export * from './ads'
+export * from './gateloop'

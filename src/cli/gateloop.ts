@@ -1,32 +1,34 @@
+/* eslint-disable complexity */
+
 /**
- * ADS CLI 入口 — nut ads
+ * GateLoop CLI 入口 — nut gateloop
  *
- * Skill 通过这个命令行工具与 ADS 引擎（Harness）交互。
+ * Skill 通过这个命令行工具与 GateLoop 引擎（Harness）交互。
  *
  * 用法：
- *   nut ads init <manifest> --task "任务描述"
- *   nut ads next <manifest>
- *   nut ads status <manifest>
- *   nut ads check <manifest>
- *   nut ads retry <manifest>
- *   nut ads reset <manifest>
- *   nut ads gc <manifest>
- *   nut ads subtask-add <manifest> --desc "子任务描述" [--id xxx] [--produces "a,b"]
- *   nut ads subtask-done <manifest> --id <subtaskId>
- *   nut ads emit <manifest> --key <key> --kind file|value [--path xxx] [--value xxx]
+ *   nut gateloop init <manifest> --task "任务描述"
+ *   nut gateloop next <manifest>
+ *   nut gateloop status <manifest>
+ *   nut gateloop check <manifest>
+ *   nut gateloop retry <manifest>
+ *   nut gateloop reset <manifest>
+ *   nut gateloop gc <manifest>
+ *   nut gateloop subtask-add <manifest> --desc "子任务描述" [--id xxx] [--produces "a,b"]
+ *   nut gateloop subtask-done <manifest> --id <subtaskId>
+ *   nut gateloop emit <manifest> --key <key> --kind file|value [--path xxx] [--value xxx]
  *
  * manifest = anchor.config.json 路径
  *
  * @example
- *   nut ads init .codebuddy/skills/my-skill/anchor.config.json --task "实现用户列表"
- *   nut ads next .codebuddy/skills/my-skill/anchor.config.json
+ *   nut gateloop init .codebuddy/skills/my-skill/anchor.config.json --task "实现用户列表"
+ *   nut gateloop next .codebuddy/skills/my-skill/anchor.config.json
  */
 
-import { loadManifest, Ads } from '../ads'
-import type { AnchorInstruction } from '../ads'
-import { runMetric, printMetricHelp } from '../ads/metrics'
+import { loadManifest, GateLoop } from '../gateloop'
+import type { AnchorInstruction } from '../gateloop'
+import { runMetric, printMetricHelp } from '../gateloop/metrics'
 
-export async function runAds(args: string[]): Promise<void> {
+export async function runGateLoop(args: string[]): Promise<void> {
     const command = args[0]
 
     if (!command || command === '--help' || command === '-h') {
@@ -69,7 +71,7 @@ export async function runAds(args: string[]): Promise<void> {
 
     try {
         const manifest = loadManifest(manifestPath)
-        const ads = new Ads(manifest)
+        const engine = new GateLoop(manifest)
 
         switch (command) {
             case 'init': {
@@ -77,13 +79,13 @@ export async function runAds(args: string[]): Promise<void> {
                     console.error('请提供 --task 参数')
                     process.exit(1)
                 }
-                const instruction = await ads.init(task)
+                const instruction = await engine.init(task)
                 printInstruction(instruction)
                 break
             }
 
             case 'next': {
-                const instruction = await ads.next()
+                const instruction = await engine.next()
                 printInstruction(instruction)
                 if (!instruction.advanced && !instruction.done) {
                     // 验证失败/熔断 → exit 1，让脚本链能感知
@@ -93,12 +95,12 @@ export async function runAds(args: string[]): Promise<void> {
             }
 
             case 'status': {
-                printInstruction(await ads.status())
+                printInstruction(await engine.status())
                 break
             }
 
             case 'check': {
-                const result = await ads.check()
+                const result = await engine.check()
                 console.log(
                     JSON.stringify(
                         {
@@ -120,20 +122,20 @@ export async function runAds(args: string[]): Promise<void> {
             }
 
             case 'retry': {
-                ads.retry()
+                engine.retry()
                 console.log('🔄 已开始新一轮尝试（producesFresh 基准已刷新）')
-                printInstruction(await ads.status())
+                printInstruction(await engine.status())
                 break
             }
 
             case 'reset': {
-                ads.reset()
+                engine.reset()
                 console.log('✅ 已重置（状态 + scratch 已清理）')
                 break
             }
 
             case 'gc': {
-                const recycled = ads.gc()
+                const recycled = engine.gc()
                 console.log(
                     `🧹 GC 完成，回收 ${recycled.length} 个残留 scratch 目录${recycled.length ? ': ' + recycled.join(', ') : ''}`
                 )
@@ -151,7 +153,7 @@ export async function runAds(args: string[]): Promise<void> {
                           .map((s) => s.trim())
                           .filter(Boolean)
                     : undefined
-                const subtasks = ads.addSubtasks([{ id: flags.id, desc: flags.desc, produces }])
+                const subtasks = engine.addSubtasks([{ id: flags.id, desc: flags.desc, produces }])
                 console.log(JSON.stringify(subtasks, null, 2))
                 break
             }
@@ -161,7 +163,7 @@ export async function runAds(args: string[]): Promise<void> {
                     console.error('请提供 --id 参数')
                     process.exit(1)
                 }
-                const subtasks = ads.completeSubtask(flags.id)
+                const subtasks = engine.completeSubtask(flags.id)
                 console.log(JSON.stringify(subtasks, null, 2))
                 break
             }
@@ -172,7 +174,7 @@ export async function runAds(args: string[]): Promise<void> {
                     process.exit(1)
                 }
                 const kind = flags.kind === 'file' ? 'file' : 'value'
-                const artifacts = ads.emit({
+                const artifacts = engine.emit({
                     key: flags.key,
                     kind,
                     path: kind === 'file' ? flags.path : undefined,
@@ -187,7 +189,7 @@ export async function runAds(args: string[]): Promise<void> {
                     console.error('请提供 --key 参数')
                     process.exit(1)
                 }
-                await ads.memWrite(flags.key, parseValue(flags.value))
+                await engine.memWrite(flags.key, parseValue(flags.value))
                 console.log(`🧠 已回写决策记忆: ${flags.key}`)
                 break
             }
@@ -201,7 +203,7 @@ export async function runAds(args: string[]): Promise<void> {
                     .split(',')
                     .map((s) => s.trim())
                     .filter(Boolean)
-                const mem = await ads.memRead(keys)
+                const mem = await engine.memRead(keys)
                 console.log(JSON.stringify(mem, null, 2))
                 break
             }
@@ -297,7 +299,7 @@ function printInstruction(instruction: AnchorInstruction) {
             `\n🧩 子任务 (${subs.filter((s) => s.status === 'done').length}/${subs.length} 完成):`
         )
         if (subs.length === 0) {
-            console.log('  ⚠️ 本阶段要求先拆分子任务：nut ads subtask-add ... --desc "..."')
+            console.log('  ⚠️ 本阶段要求先拆分子任务：nut gateloop subtask-add ... --desc "..."')
         }
         for (const s of subs) {
             console.log(`  ${s.status === 'done' ? '✅' : '⬜'} ${s.id} — ${s.desc}`)
@@ -358,25 +360,25 @@ function printInstruction(instruction: AnchorInstruction) {
 
 function printHelp() {
     console.log(`
-🔧 ADS CLI - Anchor-Driven Skill 运行时
+🔧 GateLoop CLI - Anchor-Driven Skill 运行时
 
 用法:
-  nut ads <命令> <manifest> [选项]
+  nut gateloop <命令> <manifest> [选项]
 
 命令:
-  init          初始化任务       nut ads init <manifest> --task "任务描述"
-  next          推进到下一阶段    nut ads next <manifest>
-  status        查看当前指令      nut ads status <manifest>
-  check         手动验证当前阶段   nut ads check <manifest>
-  retry         开始新一轮尝试     nut ads retry <manifest>
-  reset         重置任务          nut ads reset <manifest>
-  gc            回收过期临时目录   nut ads gc <manifest>
-  subtask-add   拆分子任务        nut ads subtask-add <manifest> --desc "..." [--id x] [--produces "a,b"]
-  subtask-done  完成子任务        nut ads subtask-done <manifest> --id <subtaskId>
-  emit          产出 artifact    nut ads emit <manifest> --key k --kind file|value [--path p] [--value v]
-  mem-write     回写决策记忆      nut ads mem-write <manifest> --key k [--value v]
-  mem-read      读取决策记忆      nut ads mem-read <manifest> --key "k1,k2"
-  metric        客观度量          nut ads metric <type> [--dir src] [--input plan.json]
+  init          初始化任务       nut gateloop init <manifest> --task "任务描述"
+  next          推进到下一阶段    nut gateloop next <manifest>
+  status        查看当前指令      nut gateloop status <manifest>
+  check         手动验证当前阶段   nut gateloop check <manifest>
+  retry         开始新一轮尝试     nut gateloop retry <manifest>
+  reset         重置任务          nut gateloop reset <manifest>
+  gc            回收过期临时目录   nut gateloop gc <manifest>
+  subtask-add   拆分子任务        nut gateloop subtask-add <manifest> --desc "..." [--id x] [--produces "a,b"]
+  subtask-done  完成子任务        nut gateloop subtask-done <manifest> --id <subtaskId>
+  emit          产出 artifact    nut gateloop emit <manifest> --key k --kind file|value [--path p] [--value v]
+  mem-write     回写决策记忆      nut gateloop mem-write <manifest> --key k [--value v]
+  mem-read      读取决策记忆      nut gateloop mem-read <manifest> --key "k1,k2"
+  metric        客观度量          nut gateloop metric <type> [--dir src] [--input plan.json]
 
 manifest:
   anchor.config.json 文件路径
@@ -393,20 +395,20 @@ manifest:
 
 示例:
   # 初始化前端开发任务（自动创建隔离 scratch + GC 过期残留）
-  nut ads init .codebuddy/skills/frontend-dev/anchor.config.json --task "实现用户列表页"
+  nut gateloop init .codebuddy/skills/frontend-dev/anchor.config.json --task "实现用户列表页"
 
   # 推进（内部强制验证 + 子任务闭环 + artifact 校验 + 熔断）
-  nut ads next .codebuddy/skills/frontend-dev/anchor.config.json
+  nut gateloop next .codebuddy/skills/frontend-dev/anchor.config.json
 
   # 大任务动态拆子任务
-  nut ads subtask-add <manifest> --desc "实现列表分页"
-  nut ads subtask-done <manifest> --id design-sub-1
+  nut gateloop subtask-add <manifest> --desc "实现列表分页"
+  nut gateloop subtask-done <manifest> --id design-sub-1
 
   # 阶段间传数据
-  nut ads emit <manifest> --key apiSpec --kind file --path .specflow/scratch/xxx/artifacts/api.json
+  nut gateloop emit <manifest> --key apiSpec --kind file --path .specflow/scratch/xxx/artifacts/api.json
 
   # 断线恢复：查看当前在哪一步；重做前刷新 fresh 基准
-  nut ads status <manifest>
-  nut ads retry <manifest>
+  nut gateloop status <manifest>
+  nut gateloop retry <manifest>
 `)
 }

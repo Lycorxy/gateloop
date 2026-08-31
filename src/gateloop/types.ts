@@ -1,8 +1,8 @@
 /**
- * ADS 类型定义
+ * GateLoop 类型定义
  *
  * Anchor-Driven Skill 的核心契约类型。
- * 任何 Skill 通过声明 AnchorManifest 即可获得 ADS 能力。
+ * 任何 Skill 通过声明 AnchorManifest 即可获得 GateLoop 能力。
  *
  * 设计层次：
  *   Anchor（阶段）= 固定的方法论骨架（design → code → verify）
@@ -265,7 +265,7 @@ export interface AnchorVerify {
     /**
      * 自动 emit：produceScripts 全部成功后，引擎按 key→path 自动产出 artifact。
      *
-     * 免除模型手动调 `nut ads emit` 的负担，让客观 anchor 真正零模型参与。
+     * 免除模型手动调 `nut gateloop emit` 的负担，让客观 anchor 真正零模型参与。
      * key = artifact key（供下游 consumes 引用），path = 产物文件路径（相对 cwd）。
      *
      * 仅在 doNext（推进）时触发；check（手动验证）不触发，避免副作用。
@@ -571,7 +571,7 @@ export interface HookContext {
  * ★ 生命周期钩子（上层注入，引擎只认契约）
  *
  * 通用接入点：记忆系统、上下文系统、知识库、figma-to-code、代码影响分析等，
- * 都通过这两个钩子接入 ADS 流程，保证多 skill/多 agent 协作时信息不衰减。
+ * 都通过这两个钩子接入 GateLoop 流程，保证多 skill/多 agent 协作时信息不衰减。
  *
  * 设计原则（与 MemoryHooks 一致）：
  *   - 可选注入：未注入时引擎降级跳过，skill 照样独立可用

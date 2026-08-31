@@ -1,5 +1,5 @@
 /**
- * ADS 状态机 — 唯一的状态写入者
+ * GateLoop 状态机 — 唯一的状态写入者
  *
  * 只有引擎函数能修改 anchor-state.json。模型无权直接写状态文件。
  *
@@ -559,7 +559,7 @@ function checkMemory(
     if (missing.length > 0) {
         verifyResult.passed = false
         verifyResult.errors.push(
-            `未回写声明的记忆: ${missing.join(', ')}（请调用 nut ads mem-write <key> <value>）`
+            `未回写声明的记忆: ${missing.join(', ')}（请调用 nut gateloop mem-write <key> <value>）`
         )
         verifyResult.checks.push({
             name: '记忆回写',

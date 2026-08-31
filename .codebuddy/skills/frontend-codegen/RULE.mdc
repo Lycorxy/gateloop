@@ -8,13 +8,13 @@ provider:
 
 # 前端代码生成 — 核心铁律
 
-## 铁律 0 — ADS Harness 驱动 + 项目环境检测（最高优先级）
+## 铁律 0 — GateLoop Harness 驱动 + 项目环境检测（最高优先级）
 
-本 Skill 由 ADS 引擎驱动（anchor.config.json），流程由引擎状态机推进，验证由引擎 exit code 判定：
-✓ 规则由 ADS reads + rulesInline 内联（不再调用 specflow-rules-engine）
-✓ 门禁由 ADS verify exit code 强制（不再依赖模型自觉的 Gate）
+本 Skill 由 GateLoop 引擎驱动（anchor.config.json），流程由引擎状态机推进，验证由引擎 exit code 判定：
+✓ 规则由 GateLoop reads + rulesInline 内联（不再调用 specflow-rules-engine）
+✓ 门禁由 GateLoop verify exit code 强制（不再依赖模型自觉的 Gate）
 ✓ 状态由 anchor-state.json 唯一管理（不再在模型脑子里）
-✗ 禁止跳过引擎验证（nut ads next 会强制重跑 verify）
+✗ 禁止跳过引擎验证（nut gateloop next 会强制重跑 verify）
 ✗ 禁止行数超限不拆分（偷懒超限交付）
 ✗ 禁止验证有错误就交付（必须自动修复到 0 错误，不让用户手动）
 ✗ 禁止用 tsc 替代 nut lint run（tsc 只查类型，lint 查格式化+圈复杂度+ESLint 规则）
@@ -74,7 +74,7 @@ Hook文件: use-xxx.ts / hook.ts | 子组件目录: components/
     - .tsx 文件一个文件一个 default export
     - Hook 文件命名 use-xxx.ts（含 useXxx 导出的文件必须 use-xxx.ts）
     - PascalCase 组件名 ↔ kebab-case 文件名对应
-  违规 = exit 1 = ADS verify FAIL
+  违规 = exit 1 = GateLoop verify FAIL
 
 三文件模式（强制）：
   index.tsx ≤ 120 行 | hook.ts ≤ 150 行 | index.module.scss ≤ 200 行
@@ -146,24 +146,24 @@ JSON.parse 必须 try/catch + 默认值 | 数组操作前 Array.isArray()
 □ 组件内嵌 fetch/数据转换 → 抽到 hook.ts / util.ts
 ```
 
-## 铁律 8 — ADS Verify 门禁（强制·不可绕过·exit code 判定）
+## 铁律 8 — GateLoop Verify 门禁（强制·不可绕过·exit code 判定）
 
 ```
-frontend-codegen 的 2 个 anchor 由 ADS 引擎强制验证，exit 0 才推进：
+frontend-codegen 的 2 个 anchor 由 GateLoop 引擎强制验证，exit 0 才推进：
 
   🔧 Anchor 1 — design（技术设计）
      引擎验证：schema 校验 frontendPlan 结构（4 张表必须齐全）+ producesFresh
-     FAIL 动作：引擎返回 errors，模型补齐后重新 nut ads next
+     FAIL 动作：引擎返回 errors，模型补齐后重新 nut gateloop next
      豁免条件：无
 
   🔧 Anchor 2 — code（编码实现 + 验证交付）
      引擎验证：tsc --noEmit + ESLint + npm run build + producesFresh（Stylelint 按需触发，仅项目有配置时跑）
      前置步骤：检测规则知识库就绪（不存在则 nut lint knowledge 生成）
-     FAIL 动作：引擎返回 verifyResult.errors，模型修复后重新 nut ads next
+     FAIL 动作：引擎返回 verifyResult.errors，模型修复后重新 nut gateloop next
      豁免条件：无（每次必过）
-     熔断：连续失败 8 次 → escalated，需 nut ads retry 或人工介入
+     熔断：连续失败 8 次 → escalated，需 nut gateloop retry 或人工介入
 
-🔴 禁止：跳过引擎验证（nut ads next 内部强制重跑 verify，模型无法绕过）
+🔴 禁止：跳过引擎验证（nut gateloop next 内部强制重跑 verify，模型无法绕过）
 🔴 禁止：自己声称"验证通过"（引擎不信嘴，只信 exit code）
 🔴 禁止：伪造门禁结果（引擎会重新执行真实命令）
 ```

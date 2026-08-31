@@ -59,13 +59,19 @@ function checkLayout() {
     } else {
         plan.layoutDecisions.forEach((d, i) => {
             if (!d.technique) {
-                errors.push(`layoutDecisions[${i}] (${d.nodeId || '?'}): 缺 technique（布局转换技术未声明）`)
+                errors.push(
+                    `layoutDecisions[${i}] (${d.nodeId || '?'}): 缺 technique（布局转换技术未声明）`
+                )
             }
         })
     }
 
     // skeleton 完备（骨架是后续 Task 拆分的基础）
-    if (!plan.skeleton || !Array.isArray(plan.skeleton.regions) || plan.skeleton.regions.length === 0) {
+    if (
+        !plan.skeleton ||
+        !Array.isArray(plan.skeleton.regions) ||
+        plan.skeleton.regions.length === 0
+    ) {
         errors.push('layout-plan.skeleton.regions 缺失或为空（骨架布局未定义，无法拆分 Task）')
     }
 
@@ -86,9 +92,7 @@ function checkReduce() {
     }
 
     // 铁律6a: 所有 Task status ∈ {completed, decomposed}
-    const incomplete = tasks.filter(
-        (t) => t.status !== 'completed' && t.status !== 'decomposed'
-    )
+    const incomplete = tasks.filter((t) => t.status !== 'completed' && t.status !== 'decomposed')
     if (incomplete.length > 0) {
         errors.push(
             `task-queue 有未完成 Task: ${incomplete.map((t) => t.id).join(', ')}（须 completed 或 decomposed）`
@@ -159,16 +163,15 @@ function checkDeliver() {
     const errors = []
     const review = readJson(`${CONTEXT}/reduce-review.json`)
 
-    // review 完整性由 ADS review 门禁校验（四道门禁），这里只校验 similarity 数值
-    if (review?.meta?.similarity !== undefined) {
-        if (review.meta.similarity < 95) {
-            errors.push(
-                `reduce-review.meta.similarity = ${review.meta.similarity}% < 95%（铁律6: 相似度未达标，禁止交付）`
-            )
-        }
+    // review 完整性由 GateLoop review 门禁校验（四道门禁），这里只校验 similarity 数值
+    if (review?.meta?.similarity === undefined) {
+        // fail-closed：未记录相似度数值 = 禁止交付（防模型空话绕过）
+        errors.push('reduce-review.meta.similarity 缺失（铁律6: 必须记录相似度数值，禁止交付）')
+    } else if (review.meta.similarity < 95) {
+        errors.push(
+            `reduce-review.meta.similarity = ${review.meta.similarity}% < 95%（铁律6: 相似度未达标，禁止交付）`
+        )
     }
-    // similarity 缺失不报错——模型可能写在 reduce-review.json 的 evidence 里
-    // review 门禁的 evidence 校验会卡"空话"，这里只管数值达标
 
     return errors
 }
@@ -178,13 +181,17 @@ function main() {
     const checkers = { layout: checkLayout, reduce: checkReduce, deliver: checkDeliver }
     const checker = checkers[args.anchor]
     if (!checker) {
-        console.error(`[check-figma-accuracy] 未知 anchor: ${args.anchor}（支持: layout/reduce/deliver）`)
+        console.error(
+            `[check-figma-accuracy] 未知 anchor: ${args.anchor}（支持: layout/reduce/deliver）`
+        )
         process.exit(1)
     }
 
     const errors = checker()
     if (errors.length > 0) {
-        console.error(`[check-figma-accuracy] FAIL: ${args.anchor} 准确性校验未通过（${errors.length} 项）`)
+        console.error(
+            `[check-figma-accuracy] FAIL: ${args.anchor} 准确性校验未通过（${errors.length} 项）`
+        )
         errors.forEach((e) => console.error('  ✖', e))
         process.exit(1)
     }

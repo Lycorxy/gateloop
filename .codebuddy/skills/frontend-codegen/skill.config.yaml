@@ -12,7 +12,7 @@ trigger-keywords:
     - 前端开发
 
 # ── 依赖关系 ──
-# v11: 去掉 specflow-rules-engine，改用 ADS harness 驱动流程+内联规则
+# v11: 去掉 specflow-rules-engine，改用 GateLoop harness 驱动流程+内联规则
 depends-on: [code-quality-guard, css-style-writer, frontend-design]
 mutual-exclude: [admin-ui-design]
 require-tools:
@@ -24,12 +24,12 @@ unload-after-run: true
 max-duration: 600
 max-token: 8000
 
-# ── ADS Harness 配置 ──
+# ── GateLoop Harness 配置 ──
 # 流程由 anchor.config.json 驱动，不再依赖 specflow-rules-engine
-# 规则注入：ADS reads + rulesInline 内联（引擎读文件后塞进指令 JSON）
-# 门禁验证：ADS verify exit code 强制（模型无法谎报通过）
-# 阶段间数据：ADS emits/consumes artifact（引擎自动内联上游数据）
-# 断线恢复：nut ads status 随时查看当前 anchor
+# 规则注入：GateLoop reads + rulesInline 内联（引擎读文件后塞进指令 JSON）
+# 门禁验证：GateLoop verify exit code 强制（模型无法谎报通过）
+# 阶段间数据：GateLoop emits/consumes artifact（引擎自动内联上游数据）
+# 断线恢复：nut gateloop status 随时查看当前 anchor
 
 # ── 触发权重 ──
 trigger-weight:

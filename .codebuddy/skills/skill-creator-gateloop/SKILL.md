@@ -18,6 +18,7 @@ description: >
 > 本 skill 用于创建 GateLoop Skill —— 即被 GateLoop（门控闭环引擎）驱动的 skill。
 > 核心：skill = 经验步骤器。每步强制执行 + 声明知识需求 + 数据契约调用 MCP + 降级保独立。
 > GateLoop 三支柱：门控（确定的交给脚本）+ 闭环（执行-验证-修复逼收敛）+ 底座（引擎强制推进，防信息衰减）。
+> 准确性方法论：**用户提供检测清单** → 逐条分流两条路径——①固定脚本/CLI/接口可执行 → verify 脚本执行（准确 100%，exit code 模型改不了）；②需要模型理解 → review 按清单逐条核对（模型一次过一遍，逐条 verdict+evidence）。
 
 ## 🛑 入口守卫
 
@@ -59,8 +60,8 @@ Flow 层（大流程，flow.config.json）        跨多 skill 编排，上下�
 │     ├── 单一领域、单 skill 内部方法论 → Anchor 层（anchor.config.json）
 │     └── 跨多 skill/agent 流水线      → Flow 层（flow.config.json）
 │   → Phase 1→7 完整工作流
-├── 优化现有 skill？        → Phase 5(验证) → 6(迭代) → 7(交付)
-├── 改造现有 skill 到 GateLoop？  → references/gateloop-engine-guide.md「如何改造现有 skill」
+├── 优化现有 skill？        → 先补检测清单（缺则向用户要）→ 逐条分流进 verify → Phase 5(验证) → 6(迭代) → 7(交付)
+├── 改造现有 skill 到 GateLoop？  → 先收用户检测清单 → 逐条分流（脚本 100% / 模型逐条核对）→ references/gateloop-engine-guide.md「如何改造现有 skill」
 ├── 多 skill 系统？         → Flow 层编排 + 编排器章节
 ├── 需要 MCP 集成？         → Phase 2 识别契约需求 → Phase 4 设计 step-contracts
 ├── 接记忆/知识库/影响分析？ → references/gateloop-engine-guide.md「通用生命周期钩子」
@@ -94,8 +95,9 @@ CAPTURE ──→ RESEARCH ──→ ARCHITECT ──→ DRAFT ──→ VALIDAT
 | 6 | 单 skill 还是多 skill 编排？ | 多 skill 时必须 |
 | 7 | 是否需要 MCP 提供的知识库/上下文/记忆？哪些步骤需要？ | 有 MCP 需求时必须 |
 | 8 | **小 skill（Anchor 层）还是大流程（Flow 层）？** 单一领域还是跨 skill 流水线？ | 必须（决定用 anchor.config.json 还是 flow.config.json） |
+| 9 | **检测清单**：用户如何判定"做完了/做对了"？逐条列出检测项，并标注——哪些是固定脚本/CLI/接口可执行（→ 路径1 脚本，准确 100%），哪些需要模型理解（→ 路径2 模型逐条核对） | 必须（用户无现成清单时，与用户共同起草并确认） |
 
-**退出条件：** 用户确认触发词 + 反触发词 + 2 个示例提示词。
+**退出条件：** 用户确认触发词 + 反触发词 + 2 个示例提示词 + 检测清单（逐条标注 路径1脚本/路径2模型）。
 
 ### Phase 2：调研
 
@@ -104,7 +106,11 @@ CAPTURE ──→ RESEARCH ──→ ARCHITECT ──→ DRAFT ──→ VALIDAT
 3. 决定资源结构：scripts / references / assets
 4. 将假设告知用户并确认
 5. 确定 **自由度等级** — 参见 [references/freedom-levels.md](references/freedom-levels.md)
-6. **识别数据契约需求** — 逐 Step 分析：
+6. **检测清单逐条分流（准确性保证的核心）** — 拿 Phase 1 的检测清单逐条判定：
+   - 固定脚本/CLI/接口可执行 → **路径1（脚本，准确 100%）**：现成命令直接进 `verify.custom`/`produceScripts`（exit code 判定）；可写成脚本的固化到 `scripts/` CLI
+   - 需要模型理解 → **路径2（模型，一次过一遍逐条核对）**：转成 `review.checklist` 项（`mode:'model'`，逐条 verdict+evidence）
+   - 分流依据：[references/floor-ceiling-guide.md](references/floor-ceiling-guide.md)（5 类细分：A 收敛/B 完备/C 度量/D 主观/E 审美）
+7. **识别数据契约需求** — 逐 Step 分析：
    - 该步需要什么知识/上下文/记忆？
    - 本地 references 能否兜底？（能 → 软依赖 `preferred`）
    - 是否为运行时实时数据，本地无法生成？（是 → 硬依赖 `required`）
@@ -147,13 +153,72 @@ skill-name/                   # kebab-case，与 name 字段一致
 **选 A（GateLoop harness 模式）时，必须同时决定以下 GateLoop 引擎配置：**
 - **层次**：Anchor 层（`anchor.config.json`，小 skill）还是 Flow 层（`flow.config.json`，大流程）
 - **anchors 划分**：把 SKILL.md 的 Step 0→N 映射为 anchors[]，每步 = 一个 anchor
-- **verify 门禁**：按 [floor-ceiling-guide.md](references/floor-ceiling-guide.md) 5 类分工配 verify（A 收敛→tsc/lint/custom，B 完备→schema，D 主观→review.model，E 审美→不进）
+- **verify 门禁（检测清单驱动·两条路径，充分发挥引擎）**：把检测清单逐条分流落地——
+  - **路径1 脚本（准确 100%）**：固定可执行项（现成 CLI/接口/脚本）→ `custom` / `produceScripts`（exit 0 = pass）；需模型声明结论的用 `review.mode:'script'`（引擎重跑 command 防伪）
+  - **路径2 模型（逐条核对）**：需理解项 → `review.checklist`（`mode:'model'`，模型一次过一遍，逐条 verdict+evidence，四道门禁卡形式：漏评/空话/造假/fail放行 均 FAIL）
+  - 逐项评估引擎能力（能落进 verify 的绝不留给模型自觉）：`produceScripts`+`autoEmit`（客观产物零模型参与）、`producesExist/producesFresh`（防复用旧文件）、`schema`（B 完备）、`lintFix/lint/tsc/stylelint/build/test/fileSize/prettier`（命令类并行）、`review`（script 防伪 + model 证据）、`requiresSubtasks`（子任务全绿才推进）、`emits/writesMemory`（数据/记忆门禁）
+  - 细分归类见 [floor-ceiling-guide.md](references/floor-ceiling-guide.md)（A 收敛→tsc/lint/custom，B 完备→schema，C 度量→回灌，D 主观→review.model，E 审美→不进）
 - **数据管道**：produces/emits/consumes/reads（artifact 管道）、readsMemory/writesMemory（决策记忆）、readsContext（防衰减上下文存档）
 - **通用钩子**（可选）：beforeAnchor（影响分析/知识库/figma 注入）、afterAnchor（经验记忆/知识库存档）
 - **委派与跳转**（Flow 层）：delegateSkill（委派子 skill）、onPass/onEscalate（非线性跳转 + 环检测）
 
 > 完整字段表、verify 4 阶段 + 3 前置门禁、通用钩子、改造步骤见
 > [references/gateloop-engine-guide.md](references/gateloop-engine-guide.md)。
+
+**GateLoop harness 完整示例（以 figma-dom-style 为蓝本）：**
+
+该 skill 是 Anchor 层 4 阶段门控的经典实现，完整展示了「`reads` 内联 + 多 anchor DAG + `requiresSubtasks` 任务队列 + `review` 三层门禁 + `.specflow/context` 数据管道」：
+
+```json
+{
+  "name": "figma-dom-style",
+  "schemaVersion": "1.0",
+  "version": "14.0.0",
+  "entry": "deliver",
+  "reads": ["RULE.mdc"],
+  "anchors": [
+    { "id": "materials", "dependsOn": [], "output": ".specflow/context/origin-dsl.json",
+      "verify": { "producesExist": true, "producesFresh": true, "schema": {},
+        "custom": ["npx nut gateloop metric design-system ...", "npx nut gateloop metric accessibility ..."] } },
+    { "id": "layout", "dependsOn": ["materials"], "output": ".specflow/context/layout-plan.json",
+      "verify": { "producesExist": true, "producesFresh": true, "schema": {},
+        "custom": ["npx nut gateloop metric spacing ..."] } },
+    { "id": "reduce", "dependsOn": ["layout"], "output": ".specflow/context/final-dsl.json",
+      "requiresSubtasks": [
+        { "id": "b1", "desc": "基线 HTML 提取真实内容", "dependsOn": [] },
+        { "id": "b2", "desc": "自适应三级拆分", "dependsOn": ["b1"] },
+        { "id": "b3", "desc": "DSL 转换 25 技巧", "dependsOn": ["b1"] },
+        { "id": "b4", "desc": "绝对定位转 flex 硬规则", "dependsOn": ["b3"] },
+        { "id": "b5", "desc": "逐元素保真 + 渲染对比", "dependsOn": ["b2","b4"] },
+        { "id": "b6", "desc": "gate 5 道门禁", "dependsOn": ["b5"] }
+      ],
+      "verify": { "producesExist": true, "producesFresh": true, "schema": {},
+        "custom": ["npx nut gateloop metric ssim ..."],
+        "review": { "output": ".specflow/context/restore-report.json", "requireEvidence": true,
+          "checklist": [
+            { "id": "ssim", "rule": "渲染相似度≥95%（脚本判定）", "mode": "script", "command": "npx nut gateloop metric ssim --input .specflow/context/final-dsl.json" },
+            { "id": "size", "rule": "尺寸还原", "mode": "model" },
+            { "id": "spacing", "rule": "间距还原", "mode": "model" },
+            { "id": "color", "rule": "颜色还原", "mode": "model" },
+            { "id": "font", "rule": "字体还原", "mode": "model" },
+            { "id": "border", "rule": "边框还原", "mode": "model" },
+            { "id": "align", "rule": "对齐还原", "mode": "model" }
+          ] } } },
+    { "id": "deliver", "dependsOn": ["reduce"],
+      "verify": { "review": { "output": ".specflow/context/deliver-report.json", "requireEvidence": true,
+        "checklist": [ { "id": "structure", "rule": "HTML 结构合法", "mode": "model" } ] } } }
+  ]
+}
+```
+
+要点（与 figma-dom-style 一一对应）：
+- `reads: ["RULE.mdc"]` 即「GateLoop harness 内联」——引擎自动把 RULE.mdc 注入 anchor 上下文，**无需 Step 0**。
+- `entry: "deliver"` 与最后 anchor id 一致，引擎按 `dependsOn` 拓扑从 materials→layout→reduce→deliver 推进。
+- `reduce` 用 `requiresSubtasks` 把单步拆成任务队列（GateLoop SubTask 驱动），**全绿才允许推进**（见 gateloop-engine-guide.md §7）。
+- verify 三道质量闸：`schema`（完备性 B）+ `custom`（收敛型 A）+ `review`（D 主观 `mode:'model'` 带证据；路径1 `mode:'script'` 引擎重跑 command 防伪，见 floor-ceiling-guide.md）。
+- 产物统一落 `.specflow/context/`，下游 anchor 用 `consumes` 引用，引擎托管防衰减。
+
+> 术语说明：部分已迁移 skill（含 figma-dom-style 早期稿）仍写 `nut ads init/next/status` 或「ADS harness」——`ads` 是历史代号，引擎已重命名为 **GateLoop**；注意 `nut ads` 命令**已被整体移除、不再可用**，规范命令为 `nut gateloop`（即 `nut gateloop init` → `nut gateloop next` → `nut gateloop status`）。
 
 **退出条件：** 结构设计完成，内容分配决定完毕。必须确认包含 RULE.mdc 和 floor-ceiling-guide.md。若选 GateLoop harness 模式，必须已决定层次（Anchor/Flow）和 anchors 划分。
 
@@ -487,6 +552,40 @@ MCP 缺失 → 降级到内置工具 / 本地 references / 问用户
 
 ---
 
+## 外部能力接入（请求 / 跨端脚本）
+
+> 当 skill 需要发起网络请求或执行跨端脚本时，**统一走 `src` 提供的 CLI 方法**，不要自己拼 `fetch` / `child_process.spawn`。
+
+本仓库 `src` 已内置两类对外能力，skill 应复用而非重复实现：
+
+### 1. 网络请求 —— `nut request`（CLI）+ `http` 模块（API）
+
+- CLI：`nut request <METHOD> <url> [选项]`
+  - `nut request GET https://api.example.com/health`
+  - `nut request POST https://api.example.com/users -d '{"name":"tom"}' -H 'Content-Type: application/json'`
+  - `nut request GET https://api.example.com/search --query 'q=node&page=2'`
+  - `nut request GET https://api.example.com/file -o result.json`
+  - 选项：`-H/--header`、`-d/--data`（支持 `@file` 或 JSON）、`--query`、`--timeout`、`--auth user:pass`、`--response-type`、`-o/--output`、`--no-throw`、`--retry`
+  - exit 0 = 成功；网络错误或非 2xx（默认）exit 1
+- 编程 API：`import { request, http } from 'ai-ultra/helpers'`
+  - 稳定可靠、无拦截器/监听器：超时、网络层重试、Body 自动序列化、统一 `HttpResponse` / `HttpError`
+
+### 2. 跨端脚本 —— `nut exec`（CLI）+ `exec` 模块（API）
+
+- CLI：`nut exec <command> [args...] [选项]`
+  - `nut exec tsc --noEmit`
+  - 基于 cross-spawn 跨端执行，过滤 PowerShell CLIXML 噪声，exit code 原样传递，crash 自动重试
+  - 选项：`--retry <N>`、`--silent`
+- 编程 API：`import { exec, crossExec, execScript } from 'ai-ultra/helpers'`
+  - 平台检测（`isWindows` / `isMac` / `isLinux`）、跨端命令拼接（`crossCommand`）、批量执行（`execParallel` / `execSequence` / `execPipe`）
+
+### 使用约定
+
+- skill 的 `scripts/` 只放确定性 CLI 工具；需要请求 / 跨端时，直接调用 `nut request` / `nut exec`，或由 `skill.config.yaml` 的 `require-tools` 声明这些工具。
+- 禁止在 skill 正文里手写 `fetch` / `child_process.spawn`；统一走上述 CLI 或 `ai-ultra/helpers` 的 API。
+
+---
+
 ## 反模式快速参考
 
 | 反模式 | 修复 |
@@ -506,6 +605,9 @@ MCP 缺失 → 降级到内置工具 / 本地 references / 问用户
 | 🔥 **缺失 floor-ceiling-guide.md** | 必须产出 5 类分工判定表 |
 | 🔥 **无中断恢复机制** | SKILL.md 必须包含中断恢复章节 |
 | 🔥 **主观维度"模型自评不进verify"** | 升级为类型D review.model 四道门禁（逐条评+带证据+fail必改） |
+| 🔥 **检测清单整块塞给模型自评** | 逐条分流：固定脚本/CLI/接口项 → verify.custom 或 review.mode:script（exit code，100% 准确）；模型理解项 → review.mode:model 逐条核对 |
+| 🔥 **现成 CLI/接口检测不用，让模型口述结论** | 固定脚本执行进 verify（custom/produceScripts），模型改不了 exit code |
+| 🔥 **verify 只配 producesExist，引擎能力闲置** | 逐项评估引擎能力（schema/命令类/review 四道门禁/requiresSubtasks/autoEmit），能落进 verify 的检测全部落地 |
 | 🔥 **全收敛型硬配review** | 无主观维度不配review（如 code-quality-guard），全 exit code |
 | 强制 `depends-on: [specflow-rules-engine]` | 已迁移 GateLoop harness，规则注入方式三选一（见 Phase 3） |
 | 强制 Step 0 规则注入 | GateLoop harness 模式由 reads + rulesInline 自动内联，无需 Step 0 |
@@ -536,7 +638,7 @@ MCP 缺失 → 降级到内置工具 / 本地 references / 问用户
 | **可验证性** | 清单 + 每阶段退出条件 + 评估模板 |
 | **协作就绪** | config.yaml 完整，规则注入方式已决定（GateLoop/独立/use_skill），mutual-exclude 已定义 |
 | **执行力** | 任务式流程 + 中断恢复机制 + 规则注入方式明确 |
-| **脚本/模型分工** | floor-ceiling-guide.md 已产出，每条规则标注 5 类归属（A收敛exit/B完备schema/C度量回灌/D主观review/E纯审美） |
+| **脚本/模型分工** | 用户检测清单已收集并逐条分流：固定脚本/CLI/接口 → 路径1 verify（exit code 100%）；模型理解项 → 路径2 review 逐条核对；每条标注 5 类归属（A收敛exit/B完备schema/C度量回灌/D主观review/E纯审美） |
 | **自由度匹配** | 指令与任务脆弱性等级匹配（高/中/低） |
 | **契约解耦** | step-contracts 声明完整 + providers≥2 级 + 核心逻辑零 MCP 名 + 降级链可用 |
 

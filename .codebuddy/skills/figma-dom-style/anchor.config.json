@@ -1,6 +1,6 @@
 {
   "name": "figma-dom-style",
-  "description": "Figma 设计稿全流程还原 ADS harness — 获取材料→布局分析→渐进实现→交付验证。ADS 引擎接管状态机（替代 harness.mjs 803行），schema+custom+review 三层门禁。内部策略级联(A→B→C)/局部验证/快照回退由模型执行（RULE.mdc 铁律约束）。",
+  "description": "Figma 设计稿全流程还原 GateLoop harness — 获取材料→布局分析→渐进实现→交付验证。GateLoop 引擎接管状态机（替代 harness.mjs 803行），schema+custom+review 三层门禁。内部策略级联(A→B→C)/局部验证/快照回退由模型执行（RULE.mdc 铁律约束）。",
   "scratchDir": ".specflow/scratch",
   "scratchGcHours": 72,
   "maxAttempts": 5,
@@ -9,7 +9,7 @@
       "id": "materials",
       "name": "获取基准材料（Step 1）",
       "brief": "MCP 三并行获取材料：figma_baseline_compare(origin-dsl.json) + figma_to_html(baseline.html) + calc_spacing(spacing-report.json)。模型调 MCP 产出文件，引擎校验存在+新鲜。铁律1a/1（spacing-report/文字颜色）已由 reads 内联。",
-      "reads": [".codebuddy/skills/figma-dom-style/RULE.mdc"],
+      "reads": ["RULE.mdc"],
       "produces": [
         ".specflow/context/origin-dsl.json",
         ".specflow/context/spacing-report.json",
@@ -24,7 +24,7 @@
     {
       "id": "layout",
       "name": "布局分析（Step 2）",
-      "brief": "分析 DSL+spacing → layout-plan.json（骨架+布局决策+盒模型+文字颜色）+ task-queue.json（标注驱动任务拆分）。引擎 schema 校验 layout-plan 完备性。task-queue.json 作为领域产物由模型维护（策略级联/局部验证用），ADS SubTask 管推进门禁。",
+      "brief": "分析 DSL+spacing → layout-plan.json（骨架+布局决策+盒模型+文字颜色）+ task-queue.json（标注驱动任务拆分）。引擎 schema 校验 layout-plan 完备性。task-queue.json 作为领域产物由模型维护（策略级联/局部验证用），GateLoop SubTask 管推进门禁。",
       "consumes": ["materials"],
       "produces": [".specflow/context/layout-plan.json"],
       "emits": ["layoutPlan"],
@@ -50,7 +50,7 @@
     {
       "id": "reduce",
       "name": "渐进实现+差异修复（Step 3-4）",
-      "brief": "骨架(3a)→区域逐个实现+验证(3b)→整合全量检测(3c)+差异修复(Step4)。requiresSubtasks 强制任务队列（task-queue.json 的 Task 映射为 ADS SubTask，全完成才推进）。内部策略级联(A纯flex→B混合→C基线复用)/局部验证(Task bounds diff)/快照回退/无效迭代检测由模型执行（RULE.mdc 铁律3a/6a/10-14）。产出 iter-final.html。引擎校验产物存在+新鲜。",
+      "brief": "骨架(3a)→区域逐个实现+验证(3b)→整合全量检测(3c)+差异修复(Step4)。requiresSubtasks 强制任务队列（task-queue.json 的 Task 映射为 GateLoop SubTask，全完成才推进）。内部策略级联(A纯flex→B混合→C基线复用)/局部验证(Task bounds diff)/快照回退/无效迭代检测由模型执行（RULE.mdc 铁律3a/6a/10-14）。产出 iter-final.html。引擎校验产物存在+新鲜。",
       "consumes": ["layoutPlan"],
       "requiresSubtasks": true,
       "maxAttempts": 8,

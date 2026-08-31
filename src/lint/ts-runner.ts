@@ -175,7 +175,7 @@ function parseTscOutput(
  *
  * tsc --noEmit 是全项目检查，不支持只查子集。此函数把 patterns 展开为文件集合，
  * 让 parseTscOutput 只保留目标文件的错误——
- * 避免 "nut lint run src/ads" 时全项目的无关错误淹没目标文件问题。
+ * 避免 "nut lint run src/gateloop" 时全项目的无关错误淹没目标文件问题。
  *
  * @returns 文件绝对路径集合（/ 分隔）；patterns 为空或无匹配时返回 null（不过滤）
  */

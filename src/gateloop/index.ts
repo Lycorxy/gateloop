@@ -1,7 +1,7 @@
 /**
- * ADS 引擎入口 — Anchor-Driven Skill 运行时（Harness）
+ * GateLoop 引擎入口 — Anchor-Driven Skill 运行时（Harness）
  *
- * 任何 Skill 通过声明 AnchorManifest 即可获得 ADS 能力。
+ * 任何 Skill 通过声明 AnchorManifest 即可获得 GateLoop 能力。
  * 引擎负责：状态机推进 + 验证判定 + 规则/数据内联 + 子任务编排 +
  *          临时工作区生命周期 + 熔断 + 日志审计。
  *
@@ -74,15 +74,15 @@ export function loadManifest(path: string): AnchorManifest {
     return JSON.parse(content) as AnchorManifest
 }
 
-// ==================== ADS 运行时 ====================
+// ==================== GateLoop 运行时 ====================
 
 /**
- * ADS 运行时实例
+ * GateLoop 运行时实例
  *
  * 封装状态机 + 验证器 + 工作区，提供 init/next/status/reset 及
  * 子任务/artifact/临时文件等 harness API。
  */
-export class Ads {
+export class GateLoop {
     private manifest: AnchorManifest
     private cwd: string
     /** ★ 补丁A：记忆读写钩子（接真实 MCP；未注入时降级本地 store） */

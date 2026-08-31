@@ -2,7 +2,7 @@
 
 > 本文讲清 GateLoop 引擎的**完整用法**：三支柱思想、两层架构（小 skill vs 大流程）、三层次使用（单功能/流程/命令）、Manifest/Anchor 字段、verify 门禁、通用生命周期钩子（含 onEvent 事件流）、边界（开发测试自动/发布人工）、如何改造现有 skill。
 >
-> GateLoop 源码：`src/ads/`（历史代号 `Ads`，待迁移）。任何 skill 通过声明 `AnchorManifest` 即可获得 GateLoop 能力——**门控推进 + 验证判定 + 数据/上下文内联 + 防信息衰减 + 事件通知**。
+> GateLoop 源码：`src/gateloop/`。引擎入口类为 `GateLoop`（由历史代号 `Ads` 重命名而来）。任何 skill 通过声明 `AnchorManifest` 即可获得 GateLoop 能力——**门控推进 + 验证判定 + 数据/上下文内联 + 防信息衰减 + 事件通知**。
 
 ---
 
@@ -123,14 +123,14 @@ GateLoop 是 skill 的执行底座，同一底座有三种使用层次（不是�
   层次1：做单一功能            层次2：做流程                层次3：当命令
   （根·最常用）              （扩展·最大价值）            （入口·操作形态）
         │                           │                           │
-  anchor.config.json         flow.config.json            nut ads init/next/...
+  anchor.config.json         flow.config.json            nut gateloop init/next/...
   单 skill 内部阶段           跨多 skill 编排             手动驱动/审计/续跑
   门控闭环防「跳步」          上下文防「衰减」             断点恢复/状态查询
 ```
 
 - **做单一功能**（根）：一个 skill 内部把方法论拆成阶段，门控防跳步——"确定的交给脚本"首先在单 skill 内部落地
 - **做流程**（扩展）：多 skill 接力，跨 skill 上下文防衰减——这是单一 skill 做不到的
-- **当命令**（入口）：`nut ads` CLI 驱动，手动推进/审计/断点续跑——不管做单功能还是做流程，最终都通过命令驱动
+- **当命令**（入口）：`nut gateloop` CLI 驱动，手动推进/审计/断点续跑——不管做单功能还是做流程，最终都通过命令驱动
 
 ---
 
@@ -338,7 +338,7 @@ export interface ContextArchive {
 **注入方式**（与 MemoryHooks 一致，可选增强）：
 
 ```typescript
-const gateLoop = new Ads(manifest, memoryHooks, {
+const gateLoop = new GateLoop(manifest, memoryHooks, {
     async beforeAnchor(ctx) {
         // 可做：代码影响分析、知识库检索、figma 解析、经验记忆语义搜索
         return [{ source: 'impact-analysis', content: '改 auth.ts 影响 5 个文件...' }]
@@ -396,7 +396,7 @@ export interface AnchorEvent {
 ### 使用示例
 
 ```typescript
-const gateLoop = new Ads(manifest, undefined, {
+const gateLoop = new GateLoop(manifest, undefined, {
     async onEvent(event) {
         // 业务方补充通知：发消息 / 写监控 / 调接口 / 调 MCP
         if (event.type === 'escalate' || event.type === 'stage_verify_fail') {
@@ -431,6 +431,61 @@ const gateLoop = new Ads(manifest, undefined, {
 
 ---
 
+## 16. 完整示例：Anchor 层 4 阶段（以 figma-dom-style 为蓝本）
+
+`figma-dom-style`（Figma 设计稿还原）是 Anchor 层多 anchor 门控的典型实现，完整展示了本指南前述全部机制。完整 JSON 亦见 `SKILL.md` Phase 3，此处给出带注解的精简版，重点说明 **anchor DAG + requiresSubtasks 任务队列 + review 三层门禁** 的组合。
+
+```json
+{
+  "name": "figma-dom-style",
+  "schemaVersion": "1.0",
+  "version": "14.0.0",
+  "entry": "deliver",
+  "reads": ["RULE.mdc"],
+  "anchors": [
+    { "id": "materials", "dependsOn": [], "output": ".specflow/context/origin-dsl.json",
+      "verify": { "producesExist": true, "producesFresh": true, "schema": { "required": ["designMeta"] },
+        "custom": ["npx nut gateloop metric design-system ...", "npx nut gateloop metric accessibility ..."] } },
+    { "id": "layout", "dependsOn": ["materials"], "output": ".specflow/context/layout-plan.json",
+      "verify": { "producesExist": true, "producesFresh": true, "schema": { "required": ["regions"] },
+        "custom": ["npx nut gateloop metric spacing ..."] } },
+    { "id": "reduce", "dependsOn": ["layout"], "output": ".specflow/context/final-dsl.json",
+      "requiresSubtasks": [
+        { "id": "b1", "desc": "基线 HTML 提取真实内容", "dependsOn": [] },
+        { "id": "b2", "desc": "自适应三级拆分", "dependsOn": ["b1"] },
+        { "id": "b3", "desc": "DSL 转换 25 技巧", "dependsOn": ["b1"] },
+        { "id": "b4", "desc": "绝对定位转 flex 硬规则", "dependsOn": ["b3"] },
+        { "id": "b5", "desc": "逐元素保真 + 渲染对比", "dependsOn": ["b2","b4"] },
+        { "id": "b6", "desc": "gate 5 道门禁", "dependsOn": ["b5"] }
+      ],
+      "verify": { "producesExist": true, "producesFresh": true, "schema": { "required": ["elements"] },
+        "custom": ["npx nut gateloop metric ssim ..."],
+        "review": { "output": ".specflow/context/restore-report.json", "requireEvidence": true,
+          "checklist": [
+            { "id": "ssim", "rule": "渲染相似度≥95%（脚本判定）", "mode": "script", "command": "npx nut gateloop metric ssim --input .specflow/context/final-dsl.json" },
+            { "id": "size", "rule": "尺寸还原", "mode": "model" },
+            { "id": "spacing", "rule": "间距还原", "mode": "model" },
+            { "id": "color", "rule": "颜色还原", "mode": "model" },
+            { "id": "font", "rule": "字体还原", "mode": "model" },
+            { "id": "border", "rule": "边框还原", "mode": "model" },
+            { "id": "align", "rule": "对齐还原", "mode": "model" }
+          ] } } },
+    { "id": "deliver", "dependsOn": ["reduce"],
+      "verify": { "review": { "output": ".specflow/context/deliver-report.json", "requireEvidence": true,
+        "checklist": [ { "id": "structure", "rule": "HTML 结构合法", "mode": "model" } ] } } }
+  ]
+}
+```
+
+**机制落点：**
+- **anchor DAG**：`materials → layout → reduce → deliver` 由 `dependsOn` 拓扑排序；引擎从 `entry`（deliver）逆推起点，逐 anchor 推进。每个 anchor 的 `output` 落 `.specflow/context/`，下游用 `consumes` 引用（防衰减数据管道，§8）。
+- **`reads: ["RULE.mdc"]`**：引擎把 RULE.mdc 自动内联进每个 anchor 上下文，等价于「harness 内联」，无需 SKILL.md Step 0（§3）。
+- **`requiresSubtasks`（§7）**：`reduce` 这一重活被拆成任务队列（b1→b6，含依赖边），由 GateLoop SubTask 驱动执行，**全部 done 才允许 `doNext` 推进**；把"一个动作一个 anchor"反模式化解为"一个阶段内多子任务"。
+- **verify 三道质量闸（§4）**：`schema`（B 完备性，字段存在即过）+ `custom`（A 收敛型，exit code 判错）+ `review`（D 主观，mode:model 带 evidence 四道门禁）。`deliver` 仅留 `review` 做最终人工级卡点。
+- **前置门禁（§5）**：`producesFresh` 防复用旧产物、`producesExist` 防空产出，与 `schema` 共同构成 3 道硬闸。
+
+> 启动命令（§1）：`nut gateloop init` → `nut gateloop next` → `nut gateloop status`。注意部分早期稿写 `nut ads ...`——`ads` 为历史代号，引擎已重命名为 **GateLoop**；`nut ads` 命令**已被移除、不再可用**，规范命令为 `nut gateloop`。
+
 ## 如何改造现有 skill 到 GateLoop harness 模式
 
 **适用对象**：已存在的 skill（有 SKILL.md 的步骤器），想获得 GateLoop 的防跳步 + 防衰减能力。
@@ -438,6 +493,13 @@ const gateLoop = new Ads(manifest, undefined, {
 ### 改造步骤
 
 ```
+Step 0  收集检测清单（改造的第一件事）
+  向用户要"如何判定做完了/做对了"的检测清单
+  （SKILL.md 原有"验证清单"章节的条目逐条并入）
+  逐条分流：
+    固定脚本/CLI/接口可执行 → 路径1（脚本，准确 100%）
+    需要模型理解          → 路径2（模型，一次过一遍逐条核对）
+
 Step 1  拆步骤 → 拆 anchor
   把 SKILL.md 正文的 Step 0→N 映射为 anchors[]
   每个强制步骤 = 一个 anchor，brief = 该步骤的目标+约束
@@ -447,11 +509,15 @@ Step 2  定输入输出
   下游依赖 → consumes
   规则文件 → reads（引擎自动内联，删掉 SKILL.md 里的 Step 0 规则注入）
 
-Step 3  配 verify 门禁（按 floor-ceiling 5 类分工）
-  类型 A 收敛 → tsc/lint/fileSize/custom
-  类型 B 完备 → schema
-  类型 D 主观 → review.model
-  类型 E 审美 → 不进 verify
+Step 3  配 verify 门禁（检测清单逐条分流落地）
+  路径1 脚本项：现成命令 → custom / produceScripts（exit code，100% 准确）
+             需模型声明结论 → review.mode:'script'（引擎重跑 command 防伪）
+             可写成脚本的 → 固化到 scripts/ CLI 再进 custom
+  路径2 模型项 → review.checklist mode:'model'（一次过一遍，逐条 verdict+evidence）
+  类型 B 完备 → schema；类型 E 审美 → 不进 verify
+  引擎能力逐项评估（producesExist/Fresh、schema、命令类并行、review 四道门禁、
+  requiresSubtasks、emits/writesMemory、produceScripts+autoEmit）——
+  能落进 verify 的检测绝不留给模型自觉
 
 Step 4  声明数据契约（有 MCP 需求时）
   每个需要外部数据的 Step → step-contracts 声明

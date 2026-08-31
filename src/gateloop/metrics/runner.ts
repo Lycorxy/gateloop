@@ -2,7 +2,7 @@
  * Metric Runner — 解析 CLI 参数并分发到具体度量器
  *
  * 调用形式：
- *   nut ads metric <type> [--dir <dir>] [--input <path>] [--plan <path>] [--help]
+ *   nut gateloop metric <type> [--dir <dir>] [--input <path>] [--plan <path>] [--help]
  */
 
 import { metricDesign } from './design-metrics'
@@ -105,10 +105,10 @@ function output(result: MetricResult): void {
 
 export function printMetricHelp(): void {
     console.log(`
-🔧 ADS Metric — 客观度量工具
+🔧 GateLoop Metric — 客观度量工具
 
 用法:
-  nut ads metric <type> [options]
+  nut gateloop metric <type> [options]
 
 类型:
   design              度量 frontendPlan 客观指标（组件数/状态数/依赖路径）

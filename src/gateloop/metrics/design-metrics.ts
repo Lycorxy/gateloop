@@ -1,3 +1,5 @@
+/* eslint-disable complexity */
+
 /**
  * design-metrics — frontendPlan 完备性校验
  *
@@ -12,7 +14,7 @@
  *   - 共享依赖检测 → 模型能看，删除
  *   - 基础计数 → 模型看 plan 一眼就知道，降级为 info 回灌
  *
- * 用法：nut ads metric design --input .specflow/context/current.json
+ * 用法：nut gateloop metric design --input .specflow/context/current.json
  */
 
 import { existsSync, readFileSync } from 'node:fs'

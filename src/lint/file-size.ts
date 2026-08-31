@@ -2,7 +2,7 @@
  * 文件规模验证器 — 独立于 ESLint，直接检查文件行数/函数行数/圈复杂度
  *
  * 即使 ESLint 没配 max-lines / max-lines-per-function / complexity 规则，
- * 此验证器仍能独立检查。接入 ADS verify 后，nut ads next 强制执行。
+ * 此验证器仍能独立检查。接入 GateLoop verify 后，nut gateloop next 强制执行。
  */
 
 import { readFileSync } from 'node:fs'

@@ -1,5 +1,5 @@
 /**
- * ADS 临时工作区（scratch）生命周期管理
+ * GateLoop 临时工作区（scratch）生命周期管理
  *
  * 每个任务分配一个隔离的 scratch 目录：
  *   .specflow/scratch/<taskId>/

@@ -23,15 +23,15 @@ const entries = {
     // CLI 入口（统一 nut 命令）
     cli: './src/cli/index.ts',
     lint: './src/cli/lint.ts',
-    git: './src/cli/git.ts',
-    'ads-cli': './src/cli/ads.ts',
+    'gateloop-cli': './src/cli/gateloop.ts',
     // 库入口
-    ads: './src/ads/index.ts'
+    gateloop: './src/gateloop/index.ts',
+    helpers: './src/helpers/index.ts'
 }
 
 // ==================== 需要添加 shebang 的文件 ====================
 
-const cliFiles = ['cli', 'lint', 'git', 'ads-cli']
+const cliFiles = ['cli', 'lint', 'gateloop-cli']
 
 // ==================== JS/TS 打包配置 ====================
 
@@ -72,7 +72,7 @@ export default [
             }
         ],
         // 外部依赖
-        external: ['esbuild', 'prettier', 'eslint'],
+        external: ['esbuild', 'prettier', 'eslint', 'glob'],
         cache: false, // 禁用缓存，确保使用新配置
         plugins: [
             alias({

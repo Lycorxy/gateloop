@@ -263,4 +263,52 @@ memory-hooks:
 2. 对照 past_bugs 排查同类问题
 3. 对照 fixes 验证是否已修复
 4. 播报：✅ [Step 2] 安全审计完成（来源：{MCP/本地}）
+
+---
+
+## GateLoop harness 模式示例（anchor.config.json · 以 figma-dom-style 为蓝本）
+
+上半部分展示「独立 skill 注入方式 B」。下面补全本 skill 主要推荐的 **GateLoop harness（anchor.config.json）** 形态——把 Step 0→N 映射为 anchors，由引擎门控推进。完整 JSON 见 `SKILL.md` Phase 3 与 `references/gateloop-engine-guide.md` §16。
+
+### anchor.config.json（精简版）
+
+```json
+{
+  "name": "figma-dom-style",
+  "schemaVersion": "1.0",
+  "version": "14.0.0",
+  "entry": "deliver",
+  "reads": ["RULE.mdc"],
+  "anchors": [
+    { "id": "materials", "dependsOn": [], "output": ".specflow/context/origin-dsl.json",
+      "verify": { "producesExist": true, "producesFresh": true, "schema": {},
+        "custom": ["npx nut gateloop metric design-system"] } },
+    { "id": "layout", "dependsOn": ["materials"], "output": ".specflow/context/layout-plan.json",
+      "verify": { "producesExist": true, "producesFresh": true, "schema": {},
+        "custom": ["npx nut gateloop metric spacing"] } },
+    { "id": "reduce", "dependsOn": ["layout"], "output": ".specflow/context/final-dsl.json",
+      "requiresSubtasks": [
+        { "id": "b1", "desc": "基线 HTML 提取真实内容", "dependsOn": [] },
+        { "id": "b5", "desc": "逐元素保真 + 渲染对比", "dependsOn": ["b1"] },
+        { "id": "b6", "desc": "gate 5 道门禁", "dependsOn": ["b5"] }
+      ],
+      "verify": { "producesExist": true, "producesFresh": true, "schema": {},
+        "custom": ["npx nut gateloop metric ssim"],
+        "review": { "output": ".specflow/context/restore-report.json", "requireEvidence": true,
+          "checklist": [
+            { "id": "size", "rule": "尺寸还原", "mode": "model" },
+            { "id": "spacing", "rule": "间距还原", "mode": "model" }
+          ] } } },
+    { "id": "deliver", "dependsOn": ["reduce"],
+      "verify": { "review": { "output": ".specflow/context/deliver-report.json", "requireEvidence": true,
+        "checklist": [ { "id": "structure", "rule": "HTML 结构合法", "mode": "model" } ] } } }
+  ]
+}
+```
+
+**关键差异（对照 注入方式 B）：**
+- 规则注入靠 `reads: ["RULE.mdc"]` 由引擎内联，不再需要 `alwaysApply` + Step 0。
+- 4 个 anchor 由 `dependsOn` 拓扑驱动，verify 不过卡住跳不了。
+- `requiresSubtasks` 把 `reduce` 拆成任务队列，全绿才推进（见 `references/gateloop-engine-guide.md` §7）。
+- 启动命令：`nut gateloop init` → `nut gateloop next` → `nut gateloop status`（`nut ads` 已废弃，命令为 `nut gateloop`）。
 ```
