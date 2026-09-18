@@ -1,0 +1,75 @@
+---
+alwaysApply: true
+---
+
+# Lynx 错误定位分析 — 强制规则
+
+> 本 Skill 由 ADS harness 驱动（anchors: extract → locate → resolve）。
+> 职责边界：**只定位错误原因和代码位置，不修复代码**。修复交给后续流程。
+
+## 铁律 0 — 职责边界（最高优先级）
+
+```
+本 Skill 到「错误定位报告产出」即结束：
+  ✓ 提取错误 + 用户描述 → 组装主提示词（master prompt）
+  ✓ 结合 JSON 数据（DOM/网络/路由/日志/内存/性能）+ 项目代码 → 定位原因和代码位置
+  ✓ 临时记录 + 形成解决方案草案
+  ✗ 禁止开始修改任何源码（那是后续修复流程的事）
+  ✗ 禁止把解决方案展开成完整代码实现（草案写到"改什么、怎么改"层级即可）
+```
+
+## 铁律 1 — 大文件必须走脚本
+
+```
+lynx-data-*.json 通常 > 500KB（含 rrweb 事件流/网络 body/控制台日志）：
+  ✗ 禁止对数据 JSON 直接使用 read_file（会超限失败或撑爆上下文）
+  ✓ 必须先运行 scripts/extract-error.cjs 产出 error-data.json（摘要 < 100KB）
+  ✓ 深挖原始数据（如 rrweb DOM）用 node -e 命令按需提取片段，禁止整读
+```
+
+## 铁律 2 — 数据脱敏
+
+```
+错误数据含 TOKEN_TEST / Token / UserPermission / cookie 等敏感存储：
+  ✓ 只输出 storage 的 key 名（error-data.json 已只导出 storageKeys）
+  ✗ 禁止在任何产物/播报中输出 token/cookie/用户信息的值
+```
+
+## 铁律 3 — 代码位置必须有证据，禁止编造
+
+```
+每个 codeLocation 必须：
+  ✓ file 指向真实存在的项目文件（verify-localization.cjs 会校验）
+  ✓ evidence 写明"为什么指向这里"（JSON 数据证据 + 代码内容证据）
+  ✓ certainty 分级：confirmed（stack/消息文本直接命中）/ likely（URL/接口路径/日志文本命中）/ candidate（间接关联）
+  ✗ 没有证据就不写 line，禁止猜测行号
+  ✗ 定位失败不是失败——certainty=candidate + openQuestions 说明缺什么信息
+```
+
+## 铁律 4 — 数据语义（来自 PLAYBACK-FORMAT.md，勿误读）
+
+```
+✓ network.status === 0 是网络层失败（CORS/断网/DNS），不是 HTTP 状态码，看 error 字段
+✓ storage diff 中 cookie 空串 = 未变化，不是被清空
+✓ responseBody 的 [binary data-uri NB] 是二进制占位标记，无法还原
+✓ input.value 是 [N chars] 脱敏格式，无法还原明文
+✓ 事件排序用 seq（全局自增），比 timestamp 稳定
+✓ v1 数据（无 encoding 字段）：storage 全量、可能含自研 dom 事件（忽略）
+✓ v2 数据 scene.dom.initial/errorMoment 通常为 null（DOM 归 rrweb 流）
+```
+
+## 铁律 5 — 产物路径约定
+
+```
+.specflow/context/error-data.json          ← Step 1 脚本产出（数据摘要）
+.specflow/context/error-brief.json         ← Step 1 模型产出（主提示词）
+.specflow/context/error-localization.json  ← Step 2 模型产出（原因+代码位置）
+.specflow/context/error-analysis-report.md ← Step 3 模型产出（最终报告=临时记录）
+```
+
+## 铁律 6 — 每步必须播报
+
+```
+✅ [Step N] …完成（含关键结论摘要）
+未播报 = 未执行 = 违规。中断后恢复必须先扫描已有产物，从断点继续。
+```

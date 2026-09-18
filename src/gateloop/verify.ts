@@ -39,7 +39,8 @@ export async function verify(
     anchor: AnchorDefinition,
     cwd: string,
     state: AnchorState,
-    hooks?: VerifyHooks
+    hooks?: VerifyHooks,
+    manifestDir?: string
 ): Promise<VerifyResult> {
     const startTime = Date.now()
     const verifyConfig = anchor.verify
@@ -58,7 +59,7 @@ export async function verify(
     // ── 阶段 0：产出型脚本（最先执行，产出 produces 声明的文件） ──
     // 解决"脚本产出型 anchor 与文件类校验顺序冲突"：原架构文件类校验先于
     // custom，首次进入时产物不存在即死锁。produceScripts 提前产出，再走文件类校验。
-    const produceChecks = runProduceScripts(verifyConfig?.produceScripts, cwd)
+    const produceChecks = runProduceScripts(verifyConfig?.produceScripts, cwd, manifestDir)
     const producePassed = produceChecks.every((c) => c.passed)
 
     // autoEmit：produceScripts 全部成功后，引擎自动产出 artifact（免模型手动 emit）
@@ -75,7 +76,7 @@ export async function verify(
     const filePassed = producePassed && fileChecks.every((c) => c.passed)
 
     // ── 阶段 2+3：修复类 + 命令类校验 + 质量评审（文件类通过才跑，节省时间） ──
-    const postChecks = filePassed ? await runPostFileChecks(anchor, verifyConfig, cwd) : []
+    const postChecks = filePassed ? await runPostFileChecks(anchor, verifyConfig, cwd, manifestDir) : []
 
     // ── 汇总结果 ──
     const checks = [...produceChecks, ...fileChecks, ...postChecks]
@@ -127,15 +128,19 @@ function checkModelWritableConfig(verifyConfig: AnchorDefinition['verify']): Ver
  * 在文件类校验之前执行，负责产出 produces 声明的文件。
  * 任一失败立即停止（后续脚本可能依赖前序产物）。
  */
-function runProduceScripts(scripts: string[] | undefined, cwd: string): VerifyCheck[] {
+function runProduceScripts(
+    scripts: string[] | undefined,
+    cwd: string,
+    manifestDir?: string
+): VerifyCheck[] {
     if (!scripts || scripts.length === 0) return []
 
     const checks: VerifyCheck[] = []
-    for (const cmd of scripts) {
+    for (const rawCmd of scripts) {
         const startTime = Date.now()
-        const result = execCommand(cmd, cwd)
+        const result = execCommand(expandCommand(rawCmd, manifestDir), cwd)
         checks.push({
-            name: `Produce: ${cmd.slice(0, 50)}`,
+            name: `Produce: ${rawCmd.slice(0, 50)}`,
             passed: result.passed,
             output: result.output,
             duration: Date.now() - startTime
@@ -196,7 +201,8 @@ function runFileChecks(
 async function runCommandChecks(
     anchor: AnchorDefinition,
     verifyConfig: AnchorDefinition['verify'],
-    cwd: string
+    cwd: string,
+    manifestDir?: string
 ): Promise<VerifyCheck[]> {
     if (!verifyConfig) return []
 
@@ -243,7 +249,9 @@ async function runCommandChecks(
             : [verifyConfig.custom]
         for (const cmd of cmds) {
             const label = cmd.slice(0, 50)
-            tasks.push(runCheck(`Custom: ${label}`, () => runCustom(cmd, cwd)))
+            tasks.push(
+                runCheck(`Custom: ${label}`, () => runCustom(expandCommand(cmd, manifestDir), cwd))
+            )
         }
     }
 
@@ -507,6 +515,16 @@ async function runCheck(
     }
 }
 
+/**
+ * ★ 替换命令中的 ${skillDir} 占位符为 manifest 所在目录（skill 可移植）。
+ * anchor.config.json 中的脚本命令写相对 skill 目录的路径时用此占位符，
+ * 如：node ${skillDir}/scripts/inventory.mjs --output .specflow/context/inventory.json
+ */
+function expandCommand(cmd: string, manifestDir?: string): string {
+    if (!manifestDir || !cmd.includes('${skillDir}')) return cmd
+    return cmd.replaceAll('${skillDir}', manifestDir)
+}
+
 /** 执行命令，exit 0 = 通过 */
 function execCommand(
     command: string,
@@ -666,16 +684,17 @@ async function runPrettierVerify(
 async function runPostFileChecks(
     anchor: AnchorDefinition,
     verifyConfig: AnchorDefinition['verify'] | undefined,
-    cwd: string
+    cwd: string,
+    manifestDir?: string
 ): Promise<VerifyCheck[]> {
     // 阶段 2a：修复类操作（同步，先于命令类校验）
     const fixChecks = runFixChecks(verifyConfig, cwd, anchor.produces)
 
     // 阶段 2b：命令类校验（并行）
-    const cmdChecks = await runCommandChecks(anchor, verifyConfig, cwd)
+    const cmdChecks = await runCommandChecks(anchor, verifyConfig, cwd, manifestDir)
 
     // 阶段 3：质量评审
-    const reviewCheck = runReviewCheck(verifyConfig?.review, cwd)
+    const reviewCheck = runReviewCheck(verifyConfig?.review, cwd, manifestDir)
     return [...fixChecks, ...cmdChecks, ...(reviewCheck ? [reviewCheck] : [])]
 }
 
@@ -696,7 +715,11 @@ async function runPostFileChecks(
  *
  * @returns VerifyCheck；未配置评审时返回 null（不计入结果，避免噪音）
  */
-function runReviewCheck(review: ReviewConfig | undefined, cwd: string): VerifyCheck | null {
+function runReviewCheck(
+    review: ReviewConfig | undefined,
+    cwd: string,
+    manifestDir?: string
+): VerifyCheck | null {
     const startTime = Date.now()
     if (!review) return null
 
@@ -724,7 +747,13 @@ function runReviewCheck(review: ReviewConfig | undefined, cwd: string): VerifyCh
     // ②③ 逐项校验 + ④ 阻断判定
     const requireEvidence = review.requireEvidence !== false
     for (const item of review.checklist) {
-        const result = validateReviewItem(item, verdictMap.get(item.id), requireEvidence, cwd)
+        const result = validateReviewItem(
+            item,
+            verdictMap.get(item.id),
+            requireEvidence,
+            cwd,
+            manifestDir
+        )
         errors.push(...result.errors)
         if (result.blockingFail) blockingFails.push(item.id)
     }
@@ -786,7 +815,8 @@ function validateReviewItem(
     item: ReviewConfig['checklist'][number],
     v: ReviewVerdict | undefined,
     requireEvidence: boolean,
-    cwd: string
+    cwd: string,
+    manifestDir?: string
 ): { errors: string[]; blockingFail: boolean } {
     const errors: string[] = []
     if (!v) return { errors, blockingFail: false } // 已在完整性门禁报错
@@ -799,7 +829,7 @@ function validateReviewItem(
 
     // ② script 项防伪：引擎重跑 command 核对
     if (item.mode === 'script') {
-        errors.push(...checkScriptItem(item, v, cwd))
+        errors.push(...checkScriptItem(item, v, cwd, manifestDir))
     }
 
     // ③ model 项要证据
@@ -816,10 +846,11 @@ function validateReviewItem(
 function checkScriptItem(
     item: ReviewConfig['checklist'][number],
     v: ReviewVerdict,
-    cwd: string
+    cwd: string,
+    manifestDir?: string
 ): string[] {
     if (!item.command) return []
-    const real = execCommand(item.command, cwd)
+    const real = execCommand(expandCommand(item.command, manifestDir), cwd)
     const realVerdict = real.passed ? 'pass' : 'fail'
     if (v.verdict !== realVerdict) {
         return [

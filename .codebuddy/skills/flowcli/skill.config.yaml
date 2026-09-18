@@ -1,0 +1,50 @@
+# ── 触发与优先级 ──
+priority: 80
+auto-trigger: true
+trigger-keywords:
+    - 流水线
+    - 创建流水线
+    - 发布测试环境
+    - 发布预发
+    - 启动流水线
+    - 更新流水线
+    - 同步流水线配置
+    - flowcli
+    - gitflow
+    - 创建MR
+    - 创建版本
+    - 打tag
+    - 回退代码
+    - 撤销代码
+    - 备份代码
+    - 配置SSH
+    - 解决冲突
+    - 对比冲突
+    - 安装flowcli
+    - 检查环境
+    - 环境检测
+
+# ── 依赖关系 ──
+depends-on: []
+mutual-exclude: []
+require-tools: [read_file, search_content, execute_command]
+
+# ── 生命周期 ──
+load-strategy: lazy
+unload-after-run: true
+max-duration: 600
+
+# ── 触发权重 ──
+trigger-weight:
+    创建流水线: 95
+    发布测试环境: 95
+    启动流水线: 90
+    回退代码: 90
+    创建MR: 85
+    gitflow: 85
+    flowcli: 80
+    安装flowcli: 80
+    检查环境: 75
+    备份代码: 75
+    配置SSH: 75
+    解决冲突: 75

@@ -1,8 +1,9 @@
 ---
 name: skill-creator-gateloop
 description: >
-  创建高质量 GateLoop Skill（被门控闭环引擎驱动的 skill）。
+  创建高质量 GateLoop Skill（被门控闭环引擎驱动的 skill），兼作 ai-ultra 库的说明书。
   当用户想要创建、优化、验证或调试任何 skill 时调用；
+  当用户询问 ai-ultra 库 / nut CLI 的能力、用法、API，或需要执行库提供的脚本时调用；
   当用户询问 GateLoop 引擎用法、anchor.config/flow.config 配置、
   如何把现有 skill 改造成 GateLoop Skill（GateLoop harness 模式）、
   该用小的 skill 还是大的流程编排时调用。
@@ -13,8 +14,10 @@ description: >
   不要用于通用编码任务、git 操作或非 skill 文件编辑。
 ---
 
-# GateLoop Skill Creator
+# GateLoop Skill Creator（兼 ai-ultra 库说明书）
 
+> 本 skill 双重定位：① 创建/改造 GateLoop Skill；② **ai-ultra 库（`src/`）的说明书**——
+> 库提供的 CLI 与脚本，在 ai-ultra 本仓库内**直接从本地构建执行**（`node dist/cli/index.cjs ...`），不从 npm 安装；在用户目标工作区才走 npm 安装（见「🔧 执行环境」）。
 > 本 skill 用于创建 GateLoop Skill —— 即被 GateLoop（门控闭环引擎）驱动的 skill。
 > 核心：skill = 经验步骤器。每步强制执行 + 声明知识需求 + 数据契约调用 MCP + 降级保独立。
 > GateLoop 三支柱：门控（确定的交给脚本）+ 闭环（执行-验证-修复逼收敛）+ 底座（引擎强制推进，防信息衰减）。
@@ -27,6 +30,57 @@ description: >
 每阶段通过后才可进入下一阶段，禁止跳阶段。
 如需跳过某阶段，必须逐条给出充足理由：①为什么可跳过 ②跳过不影响最终输出。禁止批量跳过。
 ```
+
+## 🔧 执行环境：本仓库直接执行，目标工作区先安装
+
+任何 GateLoop Skill 都靠 `nut` CLI 驱动（`gateloop init/next/status/retry/reset` 等），该 CLI 由 npm 包 `ai-ultra` 提供。**按当前所处工作区分两种执行方式：**
+
+### 场景一：在 ai-ultra 本仓库内（开发/维护库本身）
+
+**直接从本地构建执行，禁止再从 npm 安装 ai-ultra 到本仓库：**
+
+```
+npm run build                                                    # 改过 src/ 后先构建（rollup → dist/）
+node dist/cli/index.cjs gateloop init anchor.config.json --task "..."   # 即 nut 的本地直跑形态
+node dist/cli/index.cjs gateloop next anchor.config.json
+```
+
+- 库自带 npm scripts（`package.json`）：`npm run guard`（init+next）/ `guard:status` / `guard:retry` / `guard:reset` / `format` / `format:check`
+- 开发调试：`npm run dev`（rollup watch）
+- 改动 `src/**` 后必须 `npm run build`，否则 dist 还是旧代码
+
+### 场景二：用户目标工作区（把 GateLoop 用到别的项目）
+
+目标工作区没装，门禁一个都跑不起来——进入工作流前先完成：
+
+1. **检测**（任一命中 = 已安装）：
+   - 目标工作区 `package.json` 的 dependencies/devDependencies 含 `ai-ultra`
+   - `npx nut --version` 执行成功（exit 0）
+2. **未安装 → 先装到本地**（devDependency，按目标工作区的包管理器）：
+   - npm：`npm install ai-ultra --save-dev`
+   - pnpm：`pnpm add -D ai-ultra`
+   - yarn：`yarn add -D ai-ultra`
+   - 裸目录（无 package.json）→ 先 `npm init -y` 再安装
+3. **验证**：`npx nut gateloop --help` 能列出 gateloop 子命令 = 引擎可用
+4. **播报**：✅ [环境] ai-ultra 已就绪（已有 vX.Y.Z / 新装 vX.Y.Z）
+
+> npm `latest` tag 即当前版本（0.0.0-beta.8），无需指定 beta tag。
+> 禁止 `-g` 全局安装——版本随项目锁定，多项目互不污染。
+
+## 📖 ai-ultra 库能力地图（说明书）
+
+| 能力 | CLI（bin `nut`） | 源码 | 编程 API |
+|---|---|---|---|
+| GateLoop 引擎 | `nut gateloop init/next/status/retry/reset <manifest>` | `src/cli/gateloop.ts` → `src/gateloop/` | `ai-ultra/gateloop`（`GateLoop` 类 + `verify` + 全部类型） |
+| 质量度量（floor-ceiling 落地） | `nut gateloop metric ...` | `src/gateloop/metrics/` | `runMetric` / `metricDesign` / `metricArchitecture` / `metricCode` / `metricStyleCrosscheck` |
+| 代码格式化 | `nut format <path> [--check]` | `src/cli/format.ts` | `ai-ultra/format` |
+| Lint | `nut lint ...` | `src/cli/lint.ts` | `ai-ultra/lint` |
+| 网络请求 | `nut request <METHOD> <url> [选项]` | `src/cli/request.ts` | `ai-ultra/helpers`（`request` / `http`） |
+| 跨端脚本执行 | `nut exec <command> [args...]` | `src/cli/exec.ts` | `ai-ultra/helpers`（`exec` / `crossExec` / `execScript`） |
+| 全量工具集 | — | `src/` | `import {...} from 'ai-ultra'`（helpers + format + lint + gateloop） |
+
+- CLI 入口：`src/cli/index.ts` → 构建产物 `dist/cli/index.cjs`（bin `nut`）。**本仓库内上表 CLI 一律 `node dist/cli/index.cjs <子命令>` 直跑（或 npm scripts），不从 npm 安装。**
+- 引擎 API 速查：`new GateLoop(manifest, memoryHooks?, anchorHooks?)` → `init/next/status/retry/reset/check` + 子任务（`addSubtasks` / `completeSubtask`）+ artifact（`emit` / `getArtifact`）+ 记忆（`memWrite` / `memRead`）+ scratch（`tmpFile` / `tmpDir` / `dirs` / `gc`）。完整字段与门禁语义见 [references/gateloop-engine-guide.md](references/gateloop-engine-guide.md)。
 
 创建专业级 GateLoop Skill，具备最优可发现性、确定性执行和最小上下文占用。
 
@@ -101,6 +155,7 @@ CAPTURE ──→ RESEARCH ──→ ARCHITECT ──→ DRAFT ──→ VALIDAT
 
 ### Phase 2：调研
 
+0. **环境前置**：确定执行环境——在 ai-ultra 本仓库内直接跑本地构建（`node dist/cli/index.cjs ...`）；在用户目标工作区则检测是否已装 ai-ultra（`package.json` 依赖或 `npx nut --version`），未装先装（见「🔧 执行环境」章节）——没有引擎，`nut gateloop` 与 verify 门禁全部无法运行
 1. 检查工作区中已有 skill 是否有重叠
 2. 识别边界情况：畸形输入、缺失依赖、环境差异
 3. 决定资源结构：scripts / references / assets
@@ -263,13 +318,14 @@ SKILL.md 正文必须包含以下组件，以编号祈使句步骤组织：
 1. 概述（1-2 句话）
 2. 何时使用 / 何时不使用
 3. 🛑 入口守卫
-4. 核心工作流（Step 0 + Step 1...N）
+4. 🔧 环境前置：ai-ultra 检测+安装（**所有 GateLoop skill 必须**——skill 靠 `nut gateloop` 驱动：检测 `npx nut --version` → 未装 `npm i -D ai-ultra`（pnpm/yarn 同理，禁 -g）→ 验证 `npx nut gateloop --help`；ai-ultra 本仓库内直跑 `node dist/cli/index.cjs`，禁止再 npm 安装）
+5. 核心工作流（Step 0 + Step 1...N）
    └─ 每个 Step 含：知识需求声明 + 契约获取子流程 + 核心逻辑
-5. 中断与恢复机制
-6. 输出格式
-7. 错误处理
-8. 验证清单
-9. 参考资料
+6. 中断与恢复机制
+7. 输出格式
+8. 错误处理
+9. 验证清单
+10. 参考资料
 ```
 
 每个组件的内容规范参考 `references/writing-patterns.md`。
@@ -608,7 +664,8 @@ MCP 缺失 → 降级到内置工具 / 本地 references / 问用户
 | 🔥 **检测清单整块塞给模型自评** | 逐条分流：固定脚本/CLI/接口项 → verify.custom 或 review.mode:script（exit code，100% 准确）；模型理解项 → review.mode:model 逐条核对 |
 | 🔥 **现成 CLI/接口检测不用，让模型口述结论** | 固定脚本执行进 verify（custom/produceScripts），模型改不了 exit code |
 | 🔥 **verify 只配 producesExist，引擎能力闲置** | 逐项评估引擎能力（schema/命令类/review 四道门禁/requiresSubtasks/autoEmit），能落进 verify 的检测全部落地 |
-| 🔥 **全收敛型硬配review** | 无主观维度不配review（如 code-quality-guard），全 exit code |
+| 🔥 **GateLoop skill 缺 ai-ultra 环境前置** | SKILL.md 必须含「环境前置」章节：检测 `npx nut --version` → 未装先装（`npm i -D ai-ultra`）→ 验证 `npx nut gateloop --help`——skill 靠 nut gateloop 驱动，没有它门禁全部跑不起来 |
+| 🔥 **全收敛型硬配review** | 无主观维度不配review（如纯 lint 修复类任务，v14 已并入 frontend-codegen 的 code anchor），全 exit code |
 | 强制 `depends-on: [specflow-rules-engine]` | 已迁移 GateLoop harness，规则注入方式三选一（见 Phase 3） |
 | 强制 Step 0 规则注入 | GateLoop harness 模式由 reads + rulesInline 自动内联，无需 Step 0 |
 | 脚本中的魔法数字 | 记录每个常量的理由 |

@@ -3,6 +3,10 @@
 > 本文讲清 GateLoop 引擎的**完整用法**：三支柱思想、两层架构（小 skill vs 大流程）、三层次使用（单功能/流程/命令）、Manifest/Anchor 字段、verify 门禁、通用生命周期钩子（含 onEvent 事件流）、边界（开发测试自动/发布人工）、如何改造现有 skill。
 >
 > GateLoop 源码：`src/gateloop/`。引擎入口类为 `GateLoop`（由历史代号 `Ads` 重命名而来）。任何 skill 通过声明 `AnchorManifest` 即可获得 GateLoop 能力——**门控推进 + 验证判定 + 数据/上下文内联 + 防信息衰减 + 事件通知**。
+>
+> **执行环境（二分）**：`nut gateloop` CLI 由 npm 包 `ai-ultra` 提供。
+> - **在 ai-ultra 本仓库内**：直接从本地构建执行——`node dist/cli/index.cjs gateloop init/next/status <manifest>`，或 npm scripts（`guard` / `guard:status` / `guard:retry` / `guard:reset`）；改过 `src/` 先 `npm run build`。**禁止在本仓库内再从 npm 安装 ai-ultra。**
+> - **在用户目标工作区**：未安装时**先装到本地** devDependency：`npm i -D ai-ultra`（pnpm：`pnpm add -D ai-ultra`；yarn：`yarn add -D ai-ultra`；裸目录先 `npm init -y`），验证 `npx nut gateloop --help`。禁止 `-g` 全局安装——版本随项目锁定，多项目互不污染。npm `latest` tag 即当前版本（0.0.0-beta.8），无需指定 beta tag。
 
 ---
 
@@ -141,7 +145,7 @@ GateLoop 是 skill 的执行底座，同一底座有三种使用层次（不是�
 
 ├── 单一领域、单一 skill 内部的方法论
 │   → Anchor 层（小 skill，anchor.config.json）
-│   → 例：css-style-writer（写样式）、code-quality-guard（质检）
+│   → 例：figma-dom-style（设计稿还原）、frontend-codegen（代码生成全流程）
 │   → anchors = 该领域的固定步骤（如：扫描→设计→产出）
 │
 ├── 跨多个 skill / 多个 agent 协作的工程化流水线
@@ -563,7 +567,7 @@ Step 7  验证
 
 ```json
 {
-  "name": "css-style-writer",
+  "name": "style-writer",
   "description": "写样式的小 skill",
   "anchors": [
     {
@@ -610,7 +614,7 @@ Step 7  验证
     {
       "id": "design",
       "name": "技术设计",
-      "delegateSkill": "frontend-design",
+      "delegateSkill": "web-ui-design",
       "consumes": ["spec"],
       "onEscalate": "requirement",
       "produces": [".specflow/context/frontend-plan.json"],
@@ -626,7 +630,6 @@ Step 7  验证
     {
       "id": "test",
       "name": "测试验证",
-      "delegateSkill": "code-quality-guard",
       "readsContext": ["design", "dev"],
       "writesMemory": ["lastDecisions"],
       "verify": { "lint": true, "tsc": true, "test": true }

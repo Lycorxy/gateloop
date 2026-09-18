@@ -23,6 +23,12 @@ export interface AnchorManifest {
     name: string
     /** 描述 */
     description: string
+    /**
+     * ★ manifest 文件所在目录的绝对路径（由 loadManifest 自动填充，非用户配置）。
+     * 用途：reads 与脚本命令支持相对 skill 目录解析（reads 两级 fallback、命令 ${skillDir} 占位符），
+     * 让 skill 可移植——放入任意目录（如 knote），不依赖 .codebuddy/skills/<name> 固定前缀。
+     */
+    manifestDir?: string
     /** 锚点（阶段）列表，按执行顺序排列 */
     anchors: AnchorDefinition[]
     /** 状态文件路径（相对工作目录），默认 .specflow/anchor-state.json */

@@ -1,0 +1,161 @@
+{
+  "name": "frontend-codegen",
+  "description": "前端代码生成唯一入口（GateLoop harness）— 单 skill 完成 设计→生成→质检 全流程。v14 合并 frontend-design/css-style-writer/code-quality-guard 为内联规则（rules/*.mdc），消除多 skill 分裂误触发。三 anchor：inventory(环境与风格客观基线)→design(影响范围→方案→改动→任务列表)→code(按任务生成+质量验收)。引擎强制验证（exit code），模型无法跳步或谎报。",
+  "scratchDir": ".specflow/scratch",
+  "scratchGcHours": 72,
+  "maxAttempts": 5,
+  "anchors": [
+    {
+      "id": "inventory",
+      "name": "环境与风格基线（客观）",
+      "brief": "脚本产出 inventory.json：枚举 src/ 下所有 .ts/.tsx 文件并标记行数违规（客观基线，模型不参与判断）。固定约定（不可协商，全流程强制）：组件形式 = <a-b>/index.tsx + <a-b>/index.scss（目录名 kebab-case 如 user-list，入口固定 index，形式固定死）；文件命名 kebab-case；圈复杂度 ≤ 15。design 的 Phase 0 另行探测项目环境与代码风格（构建配置/样式方案/现有组件形式）。产物 modelWritable:false，verify 时脚本重跑覆盖，防伪造。",
+      "produces": [".specflow/context/inventory.json"],
+      "emits": ["inventory"],
+      "verify": {
+        "produceScripts": [
+          "node ${skillDir}/scripts/inventory.mjs --output .specflow/context/inventory.json --root src"
+        ],
+        "autoEmit": { "inventory": ".specflow/context/inventory.json" },
+        "modelWritable": false,
+        "producesFresh": true
+      }
+    },
+    {
+      "id": "design",
+      "name": "设计思考：影响范围→方案→改动→任务列表",
+      "brief": "Phase 0 环境与代码风格探测（项目配置/样式方案/现有组件 a-b 目录形式）。然后设计思考四步：①影响范围（本次改动涉及的模块/文件/依赖链，写 impactScope）②方案（按 design-rules.mdc 铁律 1-13：路由/布局/架构/模块化/耦合/状态/红线，产出 4 张表）③改动清单（changes[]：每个文件声明 action=create|modify|delete + fileType=tsx|ts|js|jsx|scss|module.css|css + 路径，组件路径必须符合 <a-b>/index 形式）④任务列表（tasks[]：从 changes 派生，每个任务对应一组文件，供 code anchor requiresSubtasks 逐任务执行）。⑤ coverage 必须覆盖 inventory.violations（targets 或 excluded+reason≥10字符，inventoryHash 一致）。⑥ 跑 metric architecture 拿候选问题清单，读 references/architecture-metrics-checklist.md 逐条精判，产出 architectureReview（每条 verdict+reason）。规则由引擎内联（rulesInline）。",
+      "reads": ["rules/design-rules.mdc"],
+      "consumes": ["inventory"],
+      "produces": [".specflow/context/current.json"],
+      "emits": ["frontendPlan", "architectureReview"],
+      "verify": {
+        "schema": {
+          "type": "object",
+          "required": ["frontendPlan", "architectureReview"],
+          "properties": {
+            "frontendPlan": {
+              "type": "object",
+              "required": [
+                "impactScope",
+                "changes",
+                "tasks",
+                "functionOwnership",
+                "stateClassification",
+                "efficiencyAudit",
+                "moduleBoundary",
+                "edgeCases",
+                "errorStates",
+                "coverage"
+              ],
+              "properties": {
+                "impactScope": {
+                  "type": "object",
+                  "required": ["files"]
+                },
+                "changes": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": ["file", "action", "fileType"]
+                  }
+                },
+                "tasks": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": ["id", "desc", "files"]
+                  }
+                },
+                "coverage": {
+                  "type": "object",
+                  "required": ["inventoryHash", "targets", "excluded"]
+                }
+              }
+            },
+            "architectureReview": {
+              "type": "object",
+              "required": ["verdicts"],
+              "properties": {
+                "verdicts": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": ["metric", "fact", "verdict", "reason"],
+                    "properties": {
+                      "metric": { "type": "string" },
+                      "fact": { "type": "string" },
+                      "verdict": { "type": "string" },
+                      "reason": { "type": "string" }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "producesFresh": true,
+        "custom": [
+          "node ${skillDir}/scripts/verify-coverage.mjs --inventory .specflow/context/inventory.json --plan .specflow/context/current.json",
+          "npx nut gateloop metric design --input .specflow/context/current.json",
+          "npx nut gateloop metric architecture --input .specflow/context/current.json"
+        ],
+        "review": {
+          "output": ".specflow/context/design-review.json",
+          "requireEvidence": true,
+          "checklist": [
+            { "id": "impact-scope", "rule": "影响范围完整：改动涉及的模块/文件/依赖链已全部识别，无遗漏的连带改动（设计思考第①步）", "mode": "model" },
+            { "id": "changes-convention", "rule": "改动清单符合固定约定：组件路径 <a-b>/index.tsx + <a-b>/index.scss（kebab-case 目录），fileType 决策与任务匹配（设计思考第③步）", "mode": "model" },
+            { "id": "tasks-derivation", "rule": "任务列表从 changes 派生：每个任务有明确文件组，无任务缺文件、无文件缺任务（设计思考第④步）", "mode": "model" },
+            { "id": "layout-decision", "rule": "布局决策基于场景选择，突破默认决策树已在 layoutRationale 声明理由（铁律1）", "mode": "model" },
+            { "id": "module-boundary", "rule": "模块划分单一职责，目录结构完整，模块间仅通过 index.tsx 暴露（铁律3）", "mode": "model" },
+            { "id": "state-classification", "rule": "状态分类正确：局部/共享/派生层恰当，无派生状态误存，Store 最小化（铁律12）", "mode": "model" },
+            { "id": "function-ownership", "rule": "函数归属正确：index.tsx 无数据加工/请求，纯函数在 utils，请求在 api/hook（铁律11）", "mode": "model" },
+            { "id": "coupling-health", "rule": "耦合健康：无死耦合(≥7分)或循环依赖，紧耦合已拆分（铁律4）", "mode": "model" },
+            { "id": "efficiency-audit", "rule": "效率审计充分：useEffect 依赖明确稳定，re-render 有 memo/callback 控制，请求去重有方案（铁律13）", "mode": "model" }
+          ]
+        }
+      }
+    },
+    {
+      "id": "code",
+      "name": "按任务生成 + 质量验收",
+      "brief": "前置：检测规则知识库就绪（references/references（skill 目录内）不存在则 nut lint knowledge 生成，--outputDir 相对 skill 目录的 references/）。然后按 frontendPlan.tasks 逐任务生成（requiresSubtasks 强制，全绿才推进）：文件形式固定 <a-b>/index.tsx + <a-b>/index.scss；按 changes[].fileType 决定生成 tsx/ts/js/jsx/scss/module.css/css。样式按 style-rules.mdc 铁律，代码按 RULE.mdc 铁律。全部生成后质量验收（quality-rules.mdc）：npx nut lint fix --write → run 循环到 0 错误。引擎强制重跑 tsc+lint+build + fileSize(圈复杂度≤15) + style-crosscheck + check-naming + verify-completion 闭环校验，exit 0 才推进。规则已由引擎内联，frontendPlan + architectureReview 已由引擎注入（artifactsInline）。",
+      "reads": ["RULE.mdc", "rules/style-rules.mdc", "rules/quality-rules.mdc"],
+      "consumes": ["frontendPlan", "architectureReview"],
+      "requiresSubtasks": true,
+      "maxAttempts": 8,
+      "produces": ["src/**/*.tsx", "src/**/*.ts", "src/**/*.scss"],
+      "verify": {
+        "tsc": true,
+        "lint": true,
+        "build": true,
+        "producesFresh": true,
+        "fileSize": { "maxFileLines": 360, "maxFunctionLines": 25, "maxComplexity": 15 },
+        "prettier": true,
+        "custom": [
+          "npx nut gateloop metric style-crosscheck --dir src/",
+          "npx nut gateloop metric code --dir src/",
+          "npx nut lint check-naming \"src/**/*.{ts,tsx}\"",
+          "node ${skillDir}/scripts/verify-completion.mjs --root src --plan .specflow/context/current.json"
+        ],
+        "review": {
+          "output": ".specflow/context/code-review.json",
+          "requireEvidence": true,
+          "checklist": [
+            { "id": "component-convention", "rule": "组件形式符合固定约定：<a-b>/index.tsx + <a-b>/index.scss（kebab-case 目录名，入口 index，固定死）", "mode": "model" },
+            { "id": "file-type-decision", "rule": "文件类型与 changes[].fileType 一致：tsx/ts/js/jsx/scss/module.css 按设计决策生成，无擅自变更", "mode": "model" },
+            { "id": "single-responsibility", "rule": "每个组件/模块单一职责，无副作用（组件只渲染+事件分发，不做 >5 行数据加工）", "mode": "model" },
+            { "id": "data-flow", "rule": "数据流清晰：props 单向注入，无隐式全局依赖，state 分类符合 frontendPlan.stateClassification", "mode": "model" },
+            { "id": "no-duplicate-logic", "rule": "无重复逻辑：相同数据处理/格式化已抽 util 或 hook，非复制粘贴", "mode": "model" },
+            { "id": "abstraction-level", "rule": "抽象层次合理：不过度抽象（单处用的 HOC）也不欠抽象（巨型组件未拆）", "mode": "model" },
+            { "id": "naming-semantics", "rule": "命名表意：变量/函数/组件名能表达意图（check-naming 只查格式，此项查语义）", "mode": "model" },
+            { "id": "coupling", "rule": "模块耦合合理：依赖方向单向无循环，符合 frontendPlan.moduleBoundary", "mode": "model" },
+            { "id": "style-dom-minimal", "rule": "样式 DOM 最小化：装饰性效果用伪元素/inherit/gap 实现，无多余装饰 DOM（style-rules 铁律4）", "mode": "model" },
+            { "id": "style-token-usage", "rule": "CSS 变量与继承：使用项目 CSS 变量不硬编码，可继承属性不重复声明（style-rules 铁律3）", "mode": "model" },
+            { "id": "style-state-coverage", "rule": "全状态覆盖：交互元素 hover/focus/disabled + 数据区 loading/empty/error 均覆盖（style-rules 铁律8）", "mode": "model" }
+          ]
+        }
+      }
+    }
+  ]
+}

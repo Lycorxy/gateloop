@@ -10,10 +10,22 @@ trigger-keywords:
     - 修改组件
     - 拆分组件
     - 前端开发
+    - 写样式
+    - 生成CSS
+    - 创建SCSS文件
+    - 添加组件样式
+    - 生成module.scss
+    - 设计前端方案
+    - 路由设计
+    - 组件拆分
+    - 检查代码
+    - 修复lint
+    - 格式化代码
 
 # ── 依赖关系 ──
-# v11: 去掉 specflow-rules-engine，改用 GateLoop harness 驱动流程+内联规则
-depends-on: [code-quality-guard, css-style-writer, frontend-design]
+# v14: 合并 frontend-design/css-style-writer/code-quality-guard 为内联规则（rules/*.mdc），
+# 不再依赖任何外部 skill——单 skill 承接全部触发场景，消除多 skill 分裂误触发
+depends-on: []
 mutual-exclude: [admin-ui-design]
 require-tools:
     [read_file, write_file, replace_in_file, search_content, search_file, execute_command, list_dir]

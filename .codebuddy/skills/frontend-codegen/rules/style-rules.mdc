@@ -1,0 +1,167 @@
+---
+description: CSS/SCSS 最优样式设计强制约束。当执行 css-style-writer、编写样式文件时必遵守。包含：扁平结构、动态类名规范、Token系统、最优设计原则（最少DOM/最少CSS）、属性顺序、反模式清单。
+alwaysApply: true
+enabled: true
+updatedAt: 2026-07-03T11:30:00.000Z
+provider:
+---
+
+# CSS/SCSS 样式编写 — 核心铁律
+
+## 铁律 0 — ADS Harness 模式 + 文件规模（强制执行）
+
+本 Skill 由 ADS harness 驱动（被 frontend-codegen anchor "code" 调用）：
+✓ 规则由 ADS reads + rulesInline 内联（不再调用 specflow-rules-engine）
+✓ 门禁由 ADS verify exit code 强制（tsc + lint + build，exit 0 才推进；stylelint 按需触发，仅项目有配置时跑）
+✓ 状态由 anchor-state.json 管理（不再在模型脑子里）
+
+禁止跳过，禁止偷懒：
+  ✗ 禁止跳过 Step 1 环境检测
+  ✗ 禁止跳过 Step 6 自审 + stylelint 验证
+  ✗ 禁止自审不通过就交付（必须修复到通过）
+  ✗ 禁止行数超限不拆分（SCSS ≤ 300 行）
+  ✗ 禁止偷懒放宽规范（扁平结构/变量/尺寸是硬性约束）
+
+必须按 SKILL.md 定义的顺序严格执行每一步。禁止跳过，禁止无声跳过。
+
+## 铁律 0a — 文件规模（超限必须拆分·不偷懒）
+
+```
+SCSS 文件 ≤ 300 行，超出必须拆分
+❌ 超限不拆分 = 违规，必须回退拆分后再交付
+❌ 不允许"麻烦就放宽限制"，规范是硬性约束
+```
+
+## 铁律 1 — 扁平结构（最高优先级）
+
+```
+绝对禁止嵌套选择器。所有伪类/伪元素在独立选择器中声明。
+✓ .<className>:hover { ... }  ← 伪类独立平铺
+✗ .<className> { .child { ... } }  ← 子选择器嵌套
+✗ .<className> .child { ... }  ← 级联选择器
+```
+
+## 铁律 2 — 类名规范（动态检测）
+
+```
+优先级1: stylelint selector-class-pattern → camelCase/kebab/snake/Pascal
+优先级2: CSS Module → 通常 camelCase (styles.className)
+优先级3: 项目既有风格 → 跟随现有代码
+```
+
+## 铁律 3 — CSS 变量
+
+```
+✓ var(--primary-color, #fff)  |  ✗ #ffffff(硬编码)
+✓ 使用项目自身变量名  |  ✗ 强推默认 Token 名
+```
+
+## 铁律 4 — 最优设计原则
+
+```
+DOM最小化：装饰用伪元素/分隔用border/计数用counter-increment
+CSS最大化：flex+gap/currentColor/composes(CSS Module)/clamp()/aspect-ratio
+DRY：公共基类+composes / 可继承不重复 / 相同状态合并
+属性顺序：定位→盒模型→排版→视觉→动效→其他
+```
+
+## 铁律 5 — 尺寸
+
+```
+按钮/输入框=40px | 表格行/表头=48px | 标题≤18px
+按钮圆角=2px(--radius-sm) | 卡片圆角=8px(--radius-lg)
+```
+
+## 铁律 6 — 卡片三件套
+
+```scss
+.card { background:var(--color-n-01,#fff); border:1px solid var(--color-n-03,#ebebeb); border-radius:var(--radius-lg,8px); box-shadow:var(--shadow-sm,0 1px 2px rgba(0,0,0,.04)); }
+```
+
+## 铁律 7 — 表格对齐
+
+```
+文字:left | 数字:right+tabular-nums | 状态:center | 操作:right
+```
+
+## 铁律 8 — 全状态覆盖
+
+```
+交互元素：Default+Hover+Focus/Active+Disabled
+数据区：Loading(Skeleton)+Empty(CTA)+Error(错误引导)
+```
+
+## 铁律 9 — ADS Verify 门禁（v7.0+·强制·不可绕过·exit code 判定）
+
+```
+被 frontend-codegen ADS code anchor 调用时，css-style-writer 必须：
+
+  🔴 执行完整流程（Step 1→1.5→2→3→4→5→6→6.5），不能因为"只改一点"就跳步
+  🔴 Step 6.5 TSX-SCSS 交叉验证已脚本化（style-crosscheck.ts），不再依赖模型自评
+  🔴 ADS verify 会强制重跑 tsc + lint + build + style-crosscheck + subtask-derivation
+     （stylelint 按需触发，仅项目有配置时跑），exit 0 才推进
+  🔴 verify 不通过 → 引擎返回 errors → 自动修复后重新 nut ads next
+
+🔴 禁止：自己声称"stylelint 通过"（引擎不信嘴，只信 exit code）
+🔴 禁止：跳过 Step 6.5 交叉验证（脚本会强制执行）
+🔴 禁止：verify 失败后不修复就继续
+
+【脚本/模型分工】（floor-ceiling-guide）：
+  - 收敛型（脚本 exit code）：零嵌套 / 无硬编码 / SCSS≤300行 / antd 在 :global / 类名一致
+  - 完备性（脚本 schema）：Step 1.5 扫描结果记录在 splitDecisions
+  - 主观（review.model 结构化评审·不再只是自评·v8 新增）：
+    style-dom-minimal     — DOM 最小化（伪元素/inherit/gap 充分使用，无多余装饰 DOM）
+    style-token-usage     — CSS 变量与继承（项目变量不硬编码，可继承属性不重复）
+    style-state-coverage  — 全状态覆盖（hover/focus/disabled + loading/empty/error）
+    这 3 项由 frontend-codegen code anchor review 强制（逐条 verdict+evidence，四道门禁）
+  - 可脚本化（建议未来加 custom 正则，暂未实施）：
+    !important / z-index≤1000 / antd 覆盖全状态（正则可扫）
+```
+
+## 铁律 10 — 已有样式复用（v6.0 新增·写前必扫）
+
+```
+写新 SCSS 前必须扫描已有样式文件（Step 1.5）：
+
+  🔴 已有公共基类（.btnBase/.cardWrap 等）→ 禁止在新文件重写，用 composes 复用
+  🔴 已有 CSS 变量定义 → 禁止重复定义
+  🔴 已有 antd 覆盖样式 → 禁止在新文件重复覆盖（合并到已有文件）
+  🔴 不扫描就写新 SCSS = 违规
+
+复用优先级：composes 引用 > 直接导入 > 新建
+```
+
+## 铁律 11 — antd 组件覆盖标准化（v6.0 新增）
+
+```
+覆盖 antd 默认样式时必须遵守：
+
+  🔴 只在 .module.scss 的 :global { } 中覆盖（不在全局 SCSS 中覆盖）
+  🔴 覆盖时必须覆盖全状态（default + hover + focus + disabled）
+  🔴 覆盖属性来源必须是 CSS 变量（不硬编码具体值）
+  🔴 已有覆盖样式（Step 1.5 扫描到的）→ 合并到已有，不重复
+
+标准格式：
+  :global {
+    .ant-input {
+      border: 1px solid var(--color-neutral-04);
+      border-radius: var(--radius-sm, 2px);
+      height: 40px;
+    }
+    .ant-input:hover { border-color: var(--color-blue-06); }
+    .ant-input:focus { border-color: var(--color-blue-07); box-shadow: 0 0 0 2px rgba(30,103,250,.1); }
+    .ant-input:disabled { background: var(--color-neutral-02); }
+  }
+```
+
+## 反模式速查
+
+```
+□ 禁止嵌套 | □ 禁止硬编码颜色/间距 | □ 禁止!important
+□ z-index≤1000 | □ min-h-dvh(非h-screen) | □ 100%(非100vw)
+□ 禁止:has()/@container/@layer/subgrid | □ border:0(非none)
+□ 禁止@import(用@use) | □ 禁止动画width/height/top/left
+□ 禁止装饰性真实DOM(用伪元素) | □ 禁止重复继承属性
+□ 禁止不扫描已有样式就写新SCSS | □ 禁止复制粘贴已有基类
+□ 禁止全局覆盖antd(只在module.scss :global中覆盖)
+□ 禁止antd覆盖漏状态(必须覆盖hover/focus/disabled)

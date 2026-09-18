@@ -1,0 +1,144 @@
+{
+  "name": "lynx-error-locator",
+  "description": "lynx-web 错误数据定位分析 ADS harness — 提取错误+用户描述组装主提示词（master prompt）→ 结合 JSON 明细（网络/路由/日志/内存/性能/DOM）与项目代码交叉定位错误原因和代码位置 → 临时记录+形成解决方案（修复交后续流程，本 skill 到报告即结束）。引擎 schema 校验完备性 + custom 脚本校验代码位置真实性/报告章节 + review 4 项定位质量评审。",
+  "scratchDir": ".specflow/scratch",
+  "scratchGcHours": 72,
+  "maxAttempts": 5,
+  "anchors": [
+    {
+      "id": "extract",
+      "name": "提取错误与用户描述（主提示词）",
+      "brief": "Step 0+1：定位数据文件（用户给路径 or 工作区搜索 lynx-data-*.json/lynx-recording-*.json，多个取最新并确认）→ 运行 extract-error.cjs 产出 error-data.json（大 JSON 禁止直接 read_file）→ 从用户消息提取用户描述 → 组装 error-brief.json（masterPrompt 按模板：用户描述/页面路由/主要错误/级联聚合/环境/数据文件）。noErrors=true 时 masterPrompt 聚焦用户描述的现象。产物是交给后续修复模型的主提示词。",
+      "reads": [
+        ".codebuddy/skills/lynx-error-locator/RULE.mdc",
+        ".codebuddy/skills/lynx-error-locator/references/json-format-guide.md"
+      ],
+      "produces": [
+        ".specflow/context/error-data.json",
+        ".specflow/context/error-brief.json"
+      ],
+      "verify": {
+        "producesExist": true,
+        "producesFresh": true,
+        "schema": {
+          "type": "object",
+          "required": ["masterPrompt", "userDescription", "dataSource", "noErrors"],
+          "properties": {
+            "masterPrompt": { "type": "string", "minLength": 30 },
+            "userDescription": { "type": "string" },
+            "noErrors": { "type": "boolean" },
+            "primaryErrors": { "type": "array" },
+            "dataSource": {
+              "type": "object",
+              "required": ["file", "format"],
+              "properties": {
+                "file": { "type": "string" },
+                "format": { "type": "string" },
+                "pageUrl": { "type": "string" },
+                "route": { "type": "string" }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "locate",
+      "name": "定位错误原因与代码位置",
+      "brief": "Step 2：消费 error-data.json + masterPrompt，按归因决策树分析（api 查网络失败/慢请求 + status=0 看 error 字段；data 查 storageKeys/数据日志；logic 查 stack + 消息文本搜索；resource 查失败资源 URL——data:URI 搜 SVG 特征、外链先搜 URL 片段搜不到则查返回该 URL 的接口定位消费组件；performance/memory 查 longTasks/内存趋势；unknown 全维度排查）。与项目代码交叉验证：错误消息/日志文本→search_content、接口路径→搜片段、路由→找页面组件、rrweb DOM 按需 node 命令深挖。每个结论需 JSON 证据+代码证据双重支撑，排除竞争假设。产出 error-localization.json（cause/codeLocations/confidence/evidence/excludedHypotheses/openQuestions）。禁止编造行号——找不到就 certainty=candidate + openQuestions（verify-localization.cjs 校验文件真实存在+行号有效）。",
+      "reads": [
+        ".codebuddy/skills/lynx-error-locator/references/analysis-playbook.md"
+      ],
+      "produces": [
+        ".specflow/context/error-localization.json"
+      ],
+      "verify": {
+        "producesExist": true,
+        "producesFresh": true,
+        "schema": {
+          "type": "object",
+          "required": ["cause", "codeLocations", "confidence", "evidence"],
+          "properties": {
+            "cause": {
+              "type": "object",
+              "required": ["rootCause", "category"],
+              "properties": {
+                "rootCause": { "type": "string", "minLength": 10 },
+                "category": {
+                  "type": "string",
+                  "enum": ["api", "data", "logic", "resource", "performance", "memory", "unknown"]
+                }
+              }
+            },
+            "codeLocations": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "required": ["file", "evidence"],
+                "properties": {
+                  "file": { "type": "string" },
+                  "line": { "type": "number" },
+                  "symbol": { "type": "string" },
+                  "certainty": {
+                    "type": "string",
+                    "enum": ["confirmed", "likely", "candidate"]
+                  },
+                  "evidence": { "type": "string", "minLength": 10 }
+                }
+              }
+            },
+            "confidence": { "type": "string", "enum": ["high", "medium", "low"] },
+            "evidence": { "type": "array", "minItems": 1 },
+            "excludedHypotheses": { "type": "array" },
+            "openQuestions": { "type": "array" }
+          }
+        },
+        "custom": [
+          "node .codebuddy/skills/lynx-error-locator/scripts/verify-localization.cjs .specflow/context/error-localization.json"
+        ],
+        "review": {
+          "output": ".specflow/context/localization-review.json",
+          "requireEvidence": true,
+          "checklist": [
+            {
+              "id": "evidence-chain",
+              "rule": "证据链完整：每个结论同时引用 JSON 数据证据（字段/事件/seq/时间戳）与项目代码证据（文件/行号/符号），无证据的断言为零",
+              "mode": "model"
+            },
+            {
+              "id": "root-cause-depth",
+              "rule": "根因深度：区分表象与根因（不是复述错误消息/归因预判），追问到「哪段代码的哪个行为导致」这一层",
+              "mode": "model"
+            },
+            {
+              "id": "localization-accuracy",
+              "rule": "定位准确：codeLocations 指向真实代码且与错误证据逻辑关联（读文件确认内容匹配），certainty 分级与证据强度一致",
+              "mode": "model"
+            },
+            {
+              "id": "hypothesis-exclusion",
+              "rule": "反证排查：考虑过竞争性假设并写明排除理由（excludedHypotheses 非空或说明为何单一假设足够），不是只走第一条线索",
+              "mode": "model"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "resolve",
+      "name": "临时记录与解决方案（交接，本 skill 到此结束）",
+      "brief": "Step 3：按 assets/report-template.md 写 .specflow/context/error-analysis-report.md（临时记录），五要素：①主提示词原文（后续修复模型直接用）②错误原因（根因+证据链+已排除假设）③代码位置（表格：文件/行号/符号/确定性/证据）④解决方案草案（改什么/怎么改/影响面，不展开完整代码）⑤交接说明（后续修复流程如何使用主提示词与本报告、验证建议、openQuestions）。运行 verify-report.cjs 校验章节。然后向用户展示核心结论并声明本 skill 结束——修复交由后续流程，禁止开始改代码。",
+      "produces": [
+        ".specflow/context/error-analysis-report.md"
+      ],
+      "verify": {
+        "producesExist": true,
+        "producesFresh": true,
+        "custom": [
+          "node .codebuddy/skills/lynx-error-locator/scripts/verify-report.cjs .specflow/context/error-analysis-report.md"
+        ]
+      }
+    }
+  ]
+}

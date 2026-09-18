@@ -225,7 +225,7 @@ Phase 3 已决定规则注入方式（三选一）：
     └── 在 SKILL.md Step 0 中显式 use_skill("<rule-engine-skill>")
 ```
 
-**何时用 A？** skill 由 GateLoop harness 驱动（如 frontend-design / css-style-writer / frontend-codegen）
+**何时用 A？** skill 由 GateLoop harness 驱动（如 frontend-codegen / figma-dom-style）
 **何时用 B？** skill 独立运行，规则需常驻 System Prompt（如 code-review-check）
 **何时用 C？** skill 依赖其他 skill 协作，且无 GateLoop harness 接管
 

@@ -10,6 +10,11 @@
  *   5. 状态覆盖四态都有处理方案（空/加载/错误/成功）
  *   6. 用户目标非空（目标导向设计，非功能清单）
  *   7. 每个交互点有 rationale（交互论证非空）
+ *   8. 视觉设计概念非空（keywords ≥2 + mood——设计感源头，禁止跳过）
+ *   9. 色彩系统完备（primary 主色 + neutral 中性色阶）
+ *   10. 字体系统完备（fontFamilies 字族 + scale 字号阶梯）
+ *   11. 页面背景处理非空（禁止纯白/纯灰裸奔无说明）
+ *   12. 签名元素非空（标志性记忆点 ≥8 字符）
  *
  * ★ 三档分工说明：
  *   本脚本只校验"设计稿完备性"（档1·可客观判定）。
@@ -99,12 +104,88 @@ function main() {
         })
     }
 
+    // 8. 视觉设计概念非空（keywords ≥2 + mood——设计感的源头，禁止跳过）
+    const vd = design.visualDesign || {}
+    const concept = vd.designConcept || {}
+    const conceptKeywords = concept.keywords || concept.style || ''
+    const conceptMood = concept.mood || ''
+    const kwOk = Array.isArray(conceptKeywords)
+        ? conceptKeywords.length >= 2
+        : typeof conceptKeywords === 'string' && conceptKeywords.trim().length >= 2
+    const moodOk = typeof conceptMood === 'string' && conceptMood.trim().length >= 2
+    if (!kwOk || !moodOk) {
+        errors.push(
+            'visualDesign.designConcept: 设计概念缺失（需 keywords≥2 个风格关键词 + mood 气质描述——设计感从概念开始，禁止跳过直接套经典模板）'
+        )
+    }
+
+    // 9. 色彩系统完备（primary 主色 + neutral 中性色阶）
+    const palette = vd.palette || {}
+    const primary = palette.primary || palette.brand || ''
+    const primaryOk =
+        (typeof primary === 'string' && primary.trim().length >= 2) ||
+        (typeof primary === 'object' && primary !== null && Object.keys(primary).length > 0)
+    const neutral = palette.neutral || palette.surface || palette.grays || ''
+    const neutralOk = Array.isArray(neutral)
+        ? neutral.length > 0
+        : (typeof neutral === 'string' && neutral.trim().length >= 2) ||
+          (typeof neutral === 'object' && neutral !== null && Object.keys(neutral).length > 0)
+    if (!primaryOk) {
+        errors.push(
+            'visualDesign.palette.primary: 主色缺失（色彩系统必须有主色，含色值或色名+用途——用户没提颜色也要主动给出）'
+        )
+    }
+    if (!neutralOk) {
+        errors.push(
+            'visualDesign.palette.neutral: 中性色缺失（背景/文字/边框的中性色阶，占页面 80% 面积）'
+        )
+    }
+
+    // 10. 字体系统完备（fontFamilies 字族 + scale 字号阶梯）
+    const typo = vd.typography || {}
+    const families = typo.fontFamilies || typo.fonts || typo.family || ''
+    const scale = typo.scale || typo.sizes || typo.typeScale || ''
+    const famOk = Array.isArray(families)
+        ? families.length > 0
+        : typeof families === 'string' && families.trim().length >= 2
+    const scaleOk = Array.isArray(scale)
+        ? scale.length >= 3
+        : typeof scale === 'string' && scale.trim().length >= 2
+    if (!famOk) {
+        errors.push(
+            'visualDesign.typography.fontFamilies: 字族缺失（至少 body 字族，建议 display+body 配对——用户没提字体也要主动给出）'
+        )
+    }
+    if (!scaleOk) {
+        errors.push('visualDesign.typography.scale: 字号阶梯缺失（≥3 级，如 12/14/16/20/24/32）')
+    }
+
+    // 11. 页面背景处理非空（禁止纯白/纯灰裸奔无说明）
+    const bgs = vd.backgrounds || {}
+    const pageBg = bgs.page || bgs.body || bgs.canvas || ''
+    const pageOk =
+        (typeof pageBg === 'string' && pageBg.trim().length >= 4) ||
+        (typeof pageBg === 'object' && pageBg !== null && Object.keys(pageBg).length > 0)
+    if (!pageOk) {
+        errors.push(
+            'visualDesign.backgrounds.page: 页面背景处理缺失（即使纯色也要声明层次策略；鼓励渐变/噪点/网格/几何装饰建立质感——用户没提背景也要主动给出）'
+        )
+    }
+
+    // 12. 签名元素非空（标志性记忆点 ≥8 字符）
+    const sig = vd.signature || vd.signatureElement || ''
+    if (typeof sig !== 'string' || sig.trim().length < 8) {
+        errors.push(
+            'visualDesign.signature: 签名元素缺失或过短（≥8 字符，回答"这个设计的记忆点是什么"——审美反模式 #9）'
+        )
+    }
+
     if (errors.length > 0) {
         console.error(`[check-ui-objective] FAIL: 设计稿客观完备性未通过（${errors.length} 项）`)
         errors.forEach((e) => console.error('  ✖', e))
         process.exit(1)
     }
-    console.log(`[check-ui-objective] PASS: 设计稿客观完备性通过（7 项检查全过）`)
+    console.log(`[check-ui-objective] PASS: 设计稿客观完备性通过（12 项检查全过）`)
     process.exit(0)
 }
 

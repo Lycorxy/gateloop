@@ -18,6 +18,7 @@
 
 import { existsSync, readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
+import { dirname, resolve } from 'node:path'
 import type {
     AnchorManifest,
     AnchorInstruction,
@@ -61,17 +62,24 @@ export function loadManifest(path: string): AnchorManifest {
     const content = readFileSync(path, 'utf-8')
     const ext = path.split('.').pop()?.toLowerCase()
 
+    let manifest: AnchorManifest
     if (ext === 'yaml' || ext === 'yml') {
         try {
             const req = createRequire(import.meta.url)
             const yaml = req('js-yaml') as { load: (s: string) => unknown }
-            return yaml.load(content) as AnchorManifest
+            manifest = yaml.load(content) as AnchorManifest
         } catch {
             throw new Error('YAML manifest 需要 js-yaml 依赖。请用 .json 格式或安装 js-yaml。')
         }
+    } else {
+        manifest = JSON.parse(content) as AnchorManifest
     }
 
-    return JSON.parse(content) as AnchorManifest
+    // ★ 填充 manifestDir：manifest 所在目录绝对路径（skill 相对路径解析基准）。
+    // reads 两级 fallback + 脚本命令 ${skillDir} 占位符都基于它，让 skill 可移植
+    // （放入 knote 等任意位置，不依赖 .codebuddy/skills/<name> 固定前缀）。
+    manifest.manifestDir = dirname(resolve(path))
+    return manifest
 }
 
 // ==================== GateLoop 运行时 ====================
@@ -126,8 +134,8 @@ export class GateLoop {
     async next(): Promise<AnchorInstruction> {
         return doNext(
             this.manifest,
-            (anchor: AnchorDefinition, cwd: string, state, hooks) =>
-                verify(anchor, cwd, state, hooks),
+            (anchor: AnchorDefinition, cwd: string, state, hooks, manifestDir) =>
+                verify(anchor, cwd, state, hooks, manifestDir),
             this.cwd,
             this.memoryHooks,
             this.anchorHooks
@@ -173,7 +181,7 @@ export class GateLoop {
             return { passed: true, checks: [], errors: [], duration: 0 }
         }
 
-        return verify(anchor, this.cwd, state)
+        return verify(anchor, this.cwd, state, undefined, this.manifest.manifestDir)
     }
 
     // ==================== 子任务（动态拆分） ====================

@@ -1,15 +1,15 @@
 {
   "name": "web-ui-design",
-  "description": "Web UI/交互设计 ADS harness — 需求→功能→布局→交互→线框图→容错→检测。融入 HCI 七定律/诺曼七阶段/目标导向/微交互/渐进披露/错误容错/信息层级理论。引擎 schema 校验完备性 + custom 客观项脚本 + review 6 项设计决策质量评审。",
+  "description": "Web UI/交互/视觉设计 GateLoop harness — 需求→功能→布局→交互→线框图→视觉设计→容错→检测。融入 HCI 七定律/诺曼七阶段/目标导向/微交互/渐进披露/容错/信息层级 + 视觉设计系统（设计概念/色彩/字体/背景/签名元素）。引擎 schema 校验完备性 + custom 客观项脚本 + review 9 项（6 决策质量 + 3 视觉质量）评审。",
   "scratchDir": ".specflow/scratch",
   "scratchGcHours": 72,
   "maxAttempts": 5,
   "anchors": [
     {
       "id": "ui-design",
-      "name": "UI/交互设计（需求→线框图）",
-      "brief": "7 Phase 流程（融入交互设计理论）：Phase0 需求读+目标导向(区分目标/任务/功能) → Phase1 功能思考(覆盖需求) → Phase2 信息架构+布局决策(五层模型结构层+费茨/希克/米勒定律+方案量化对比) → Phase3 交互设计(诺曼七阶段消除鸿沟+微交互四要素+渐进披露) → Phase4 线框图产出(ASCII+信息层级六大视觉手段) → Phase5 容错+状态覆盖(错误四策略+四态) → Phase6 设计检测(7项+交互理论校验)。产出 ui-design.json。引擎 schema 校验字段完备 + custom 跑客观项(导航≤9/方案≥2/线框图≥50字/四态覆盖/功能非空/目标非空/交互论证) + review 6 项设计决策质量主观评审。规则由 reads 内联。",
-      "reads": [".codebuddy/skills/web-ui-design/RULE.mdc"],
+      "name": "UI/交互/视觉设计（需求→线框图→视觉系统）",
+      "brief": "8 Phase 流程：Phase0 需求读+目标导向(区分目标/任务/功能) → Phase1 功能思考(覆盖需求) → Phase2 信息架构+布局决策(方案量化对比) → Phase3 交互设计(诺曼+微交互+渐进披露) → Phase4 线框图(ASCII+信息层级六手段) → Phase5 视觉设计(设计概念→色彩系统→字体系统→背景质感→效果→签名元素；用户不提视觉要求也必须给出有主见的视觉系统，禁止默认灰白+默认蓝裸奔；按 knowledge/visual-design.md 风格谱系选型并给理由) → Phase6 容错+状态覆盖(四策略+四态) → Phase7 设计检测(7项检测+视觉质量校验)。产出 ui-design.json（含 visualDesign）。引擎 schema 校验字段完备(含 visualDesign: designConcept/palette/typography/backgrounds/signature) + custom 跑客观项(导航≤9/方案≥2/线框图≥50字/四态覆盖/目标非空/交互论证/视觉系统完备) + review 9 项设计质量主观评审(6 决策 + 3 视觉)。规则由 reads 内联。",
+      "reads": ["RULE.mdc"],
       "produces": [".specflow/context/ui-design.json"],
       "emits": ["uiDesign"],
       "verify": {
@@ -22,6 +22,7 @@
             "layoutDecisions",
             "interactionDesign",
             "wireframe",
+            "visualDesign",
             "stateCoverage"
           ],
           "properties": {
@@ -34,6 +35,33 @@
               "required": ["options", "selected", "rationale"]
             },
             "wireframe": { "type": "string" },
+            "visualDesign": {
+              "type": "object",
+              "required": [
+                "designConcept",
+                "palette",
+                "typography",
+                "backgrounds",
+                "signature"
+              ],
+              "properties": {
+                "designConcept": {
+                  "type": "object",
+                  "required": ["keywords", "mood"]
+                },
+                "palette": {
+                  "type": "object",
+                  "required": ["primary", "neutral"]
+                },
+                "typography": {
+                  "type": "object",
+                  "required": ["fontFamilies", "scale"]
+                },
+                "backgrounds": { "type": "object" },
+                "effects": { "type": "object" },
+                "signature": { "type": "string" }
+              }
+            },
             "stateCoverage": {
               "type": "object",
               "required": ["empty", "loading", "error", "success"]
@@ -42,7 +70,7 @@
         },
         "producesFresh": true,
         "custom": [
-          "node .codebuddy/skills/web-ui-design/scripts/check-ui-objective.mjs --design .specflow/context/ui-design.json"
+          "node ${skillDir}/scripts/check-ui-objective.mjs --design .specflow/context/ui-design.json"
         ],
         "review": {
           "output": ".specflow/context/ui-review.json",
@@ -76,6 +104,21 @@
             {
               "id": "error-robustness",
               "rule": "容错覆盖：预防/捕获/告知/恢复四策略 + 空/加载/错误/成功四态全覆盖（错误容错设计）",
+              "mode": "model"
+            },
+            {
+              "id": "visual-system",
+              "rule": "视觉系统完备且有主见：色彩(60-30-10+完整色阶)、字体(字族配对+字号阶梯+字重对比)、背景(层次处理非纯白纯灰裸奔)、效果(圆角/阴影/描边统一)成体系——用户没提颜色/字体/背景也必须主动给出，非默认蓝+默认字族的敷衍状态",
+              "mode": "model"
+            },
+            {
+              "id": "design-distinctiveness",
+              "rule": "设计感与独特性：有明确设计概念(keywords+mood+参照系)与签名元素(记忆点)，与通用模板/千篇一律的经典后台拉开差异，规避 RULE 审美反模式 10 条（尤其 #5 Inter+slate 无特色、#9 无签名元素、#10 纯灰底白卡片）",
+              "mode": "model"
+            },
+            {
+              "id": "visual-contrast-quality",
+              "rule": "视觉层次质量：对比/留白/节奏建立信息优先级，正文对比度达 WCAG AA(4.5:1)，主色占比≤5%、中性色≥80%，色彩语义一致（同义同色）",
               "mode": "model"
             }
           ]

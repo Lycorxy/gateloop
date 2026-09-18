@@ -53,7 +53,6 @@ PowerShell CLIXML 噪声规避：
 ```
 中间产物（lint 输出、临时分析文件等）必须写入 scratchDir，禁止堆项目根：
   ✓ .specflow/scratch/         frontend-codegen 的 scratchDir
-  ✓ .codebuddy/scratch/        code-quality-guard 的 scratchDir
   ✗ lint_output.txt            禁止在项目根创建临时文件
   ✗ tmp-*.cjs / tmp-*.txt     禁止在项目根创建临时文件
 ```
@@ -76,20 +75,21 @@ Hook文件: use-xxx.ts / hook.ts | 子组件目录: components/
     - PascalCase 组件名 ↔ kebab-case 文件名对应
   违规 = exit 1 = GateLoop verify FAIL
 
-三文件模式（强制）：
-  index.tsx ≤ 120 行 | hook.ts ≤ 150 行 | index.module.scss ≤ 200 行
+组件形式（固定死，不可协商）：
+  <a-b>/index.tsx + <a-b>/index.scss   目录名 kebab-case（如 user-list），入口固定 index
+  index.tsx ≤ 120 行 | hook.ts ≤ 150 行 | index.scss ≤ 200 行
 
 ❌ 超过 360 行必须拆分，不允许偷懒超限交付
 ❌ 超限不拆分 = 违规，必须回退拆分后再交付
 ❌ 不允许"麻烦就放宽限制"，规范是硬性约束
 
-【圈复杂度逃生口】（11-13 允许声明例外）：
-  圈复杂度 ≤ 10：PASS
-  圈复杂度 11-13：触发"拆分建议"，模型可选择：
+【圈复杂度逃生口】（16-18 允许声明例外）：
+  圈复杂度 ≤ 15：PASS（基线 15，固定死）
+  圈复杂度 16-18：触发"拆分建议"，模型可选择：
     A. 拆分（默认推荐）
     B. 加 // @complexity-justified: 此处为状态机 reducer，本质复杂不可拆 注释
        custom 脚本扫描此注释，允许通过（但仍记录到度量报告供审计）
-  圈复杂度 > 13 / 函数 > 25 行 / 文件 > 360 行：必须拆分，无逃生口
+  圈复杂度 > 18 / 函数 > 25 行 / 文件 > 360 行：必须拆分，无逃生口
 
 🔴 逃生口注释格式必须严格：// @complexity-justified: <具体理由>
 🔴 逃生口滥用（如所有函数都加）= 设计问题，需重新审视
@@ -149,15 +149,20 @@ JSON.parse 必须 try/catch + 默认值 | 数组操作前 Array.isArray()
 ## 铁律 8 — GateLoop Verify 门禁（强制·不可绕过·exit code 判定）
 
 ```
-frontend-codegen 的 2 个 anchor 由 GateLoop 引擎强制验证，exit 0 才推进：
+frontend-codegen 的 3 个 anchor 由 GateLoop 引擎强制验证，exit 0 才推进：
 
-  🔧 Anchor 1 — design（技术设计）
-     引擎验证：schema 校验 frontendPlan 结构（4 张表必须齐全）+ producesFresh
+  🔧 Anchor 1 — inventory（环境与风格基线，客观）
+     引擎验证：produceScripts 重跑覆盖 + producesFresh + modelWritable:false
+     FAIL 动作：引擎返回 errors（脚本执行失败）
+     豁免条件：无
+
+  🔧 Anchor 2 — design（设计思考：影响范围→方案→改动→任务列表）
+     引擎验证：schema 校验 frontendPlan 结构（impactScope/changes/tasks + 4 张表必须齐全）+ verify-coverage 集合闭包 + producesFresh
      FAIL 动作：引擎返回 errors，模型补齐后重新 nut gateloop next
      豁免条件：无
 
-  🔧 Anchor 2 — code（编码实现 + 验证交付）
-     引擎验证：tsc --noEmit + ESLint + npm run build + producesFresh（Stylelint 按需触发，仅项目有配置时跑）
+  🔧 Anchor 3 — code（按任务生成 + 质量验收）
+     引擎验证：tsc --noEmit + ESLint + npm run build + fileSize（圈复杂度 ≤ 15）+ producesFresh（Stylelint 按需触发，仅项目有配置时跑）
      前置步骤：检测规则知识库就绪（不存在则 nut lint knowledge 生成）
      FAIL 动作：引擎返回 verifyResult.errors，模型修复后重新 nut gateloop next
      豁免条件：无（每次必过）

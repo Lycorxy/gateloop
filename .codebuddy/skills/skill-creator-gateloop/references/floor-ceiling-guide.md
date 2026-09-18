@@ -56,7 +56,9 @@ Q4: 是否有可归类的质量维度（能列 checklist 逐条评）？
 | **交互是否消除鸿沟** | **D 主观可评审** | **review.model（interaction-design）** | **blocking fail 禁推进** |
 | **信息层级是否清晰** | **D 主观可评审** | **review.model（information-hierarchy）** | **blocking fail 禁推进** |
 | **容错四态是否覆盖** | **D 主观可评审** | **review.model（error-robustness）** | **blocking fail 禁推进** |
-| 视觉效果是否达标 | E 纯审美 | 模型自由 | 不进 verify |
+| 视觉**系统完备性**（色彩/字体/背景字段齐全非空） | B 完备性 | 脚本 schema + custom | FAIL（缺字段） |
+| **视觉设计质量/设计感**（成体系/有记忆点/非模板脸） | D 主观可评审 | review.model（visual-system 等） | blocking fail 禁推进 |
+| 纯视觉直觉（说不清标准的"好看"） | E 纯审美 | 模型自由 | 不进 verify |
 | 交互动线是否自然 | E 纯审美 | 模型自由 | 不进 verify |
 
 ## 5 类质量归属
@@ -156,10 +158,10 @@ Q4: 是否有可归类的质量维度（能列 checklist 逐条评）？
 - `mode: 'script'`：确定项但需模型声明，引擎重跑 command 核对（防伪）
 
 **实际案例**：
-- frontend-codegen code anchor：9 项 model（6代码质量+3样式质量）
-- frontend-codegen design anchor：6 项 model（设计决策质量）
-- web-ui-design：6 项 model（需求/功能/布局/交互/信息层级/容错）
-- code-quality-guard：**不配 review**（全是类型 A 收敛型，无主观维度）
+- frontend-codegen code anchor：11 项 model（2 固定约定 + 6 代码质量 + 3 样式质量）
+- frontend-codegen design anchor：9 项 model（设计思考四步：影响范围/改动约定/任务派生 + 设计决策质量）
+- web-ui-design：9 项 model（6 决策质量 + 3 视觉质量：visual-system/design-distinctiveness/visual-contrast-quality，v3.1）
+- 纯收敛型场景（如 lint 修复任务，v14 已并入 frontend-codegen）：**不配 review**（全是类型 A 收敛型，无主观维度）
 - figma-dom-style：6 项 model（还原保真度：尺寸/间距/颜色/字体/边框/对齐），reduce anchor 的 review 门禁
 
 ### 类型 E — 纯审美（完全交给模型，不进 verify）
@@ -258,5 +260,5 @@ Q1: 否 → Q2: 否 → Q3: 否 → Q4: 否（写不出评审标准）→ 类型
 | 把"是否优雅"交给脚本 judge | 脚本无法主观判断 | 类型 D review.model，模型评+脚本卡形式 |
 | 完备性字段不存在但 verify PASS | 完备性是收敛型 | schema required 强制 |
 | ★ 主观维度"模型自评不进 verify"（v1 缺陷） | 自评放水，"我觉得没问题"就过 | 类型 D review.model 四道门禁，逐条评+带证据+fail必改 |
-| ★ 全收敛型 skill 硬配 review | 没有主观维度硬塞 review 项 | 全收敛型（如 code-quality-guard）不配 review，全 exit code 判定 |
+| ★ 全收敛型 skill 硬配 review | 没有主观维度硬塞 review 项 | 全收敛型（纯 lint 修复类任务）不配 review，全 exit code 判定 |
 | ★ review checklist 项过多（>10） | 模型负担过重，低价值打卡 | 聚焦关键维度 4-9 项，细节归 RULE.mdc 规则 |

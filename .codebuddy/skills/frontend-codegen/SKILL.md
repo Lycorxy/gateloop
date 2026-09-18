@@ -1,25 +1,42 @@
 ---
 name: frontend-codegen
 description: >
-  前端代码生成唯一入口。由 GateLoop harness 驱动，编排 frontend-design（设计）+
-  code-quality-guard（规则+验证）+ css-style-writer（样式）。
+  前端代码生成唯一入口。由 GateLoop harness 驱动，单 skill 完成 设计→生成→质检 全流程
+  （v14 已合并 frontend-design + code-quality-guard + css-style-writer 为内联规则 rules/*.mdc，
+  不再编排外部 skill，消除多 skill 分裂误触发）。
   引擎强制验证（exit code），模型无法跳步或谎报通过。
   规则由 GateLoop reads + rulesInline 内联，不依赖 specflow-rules-engine。
   通用独立 skill，不绑定特定设计稿来源。
-version: 12.1.0
+  固定约定：组件 = a-b/index.tsx + a-b/index.scss（kebab-case，固定死）；圈复杂度 ≤ 15。
+version: 14.0.0
 dependencies: []
 allowed-tools:
   [read_file, write_file, replace_in_file, search_content, search_file, execute_command, list_dir]
 max-token: 8000
 ---
 
-# Frontend Codegen v13 — GateLoop Harness 驱动（3 阶段 + 客观输入防伪）
+# Frontend Codegen v14 — GateLoop Harness 驱动（单 skill 全流程）
 
+> v14 核心变更：**合并**。frontend-design + code-quality-guard + css-style-writer 三个 skill 已合并为本 skill
+> 的内联规则（rules/design-rules.mdc + rules/quality-rules.mdc + rules/style-rules.mdc），独立 skill 目录已删除。
+> 所有前端相关触发词（写样式/生成CSS/检查代码/设计前端方案/生成代码...）统一路由到本 skill——唯一入口，消除分裂误触发。
+> 固定约定（不可协商）：组件形式 = <a-b>/index.tsx + <a-b>/index.scss（kebab-case 目录，固定死）；圈复杂度 ≤ 15。
 > v13 核心变更：新增 inventory anchor（客观输入先行 + 集合闭包防伪）。
 > 脚本枚举违规文件 → design 必须覆盖 → code 末尾重跑断言清零，模型无法"只处理部分文件糊弄过关"。
-> v12 核心变更：从 4 anchor 精简为 2 anchor（design → code），消除验证冗余。
-> rules anchor 已删除（规则注入由 GateLoop reads 自动完成）。
-> verify anchor 已合并到 code anchor（避免 tsc+lint 重跑两遍）。
+
+## 全流程总览（两步）
+
+```
+① 环境与代码风格检测（inventory anchor + design Phase 0）
+   脚本客观枚举违规基线 + 探测项目配置/样式方案/现有组件形式
+   固定约定：组件 a-b/index.tsx + index.scss | 圈复杂度 ≤ 15 | 命名 kebab-case 固定
+
+② 设计思考 → 按任务生成 → 质量验收
+   design anchor：影响范围 → 方案（4 张表）→ 改动清单 changes[]（含文件类型决策
+     tsx|ts|js|jsx|scss|module.css|css）→ 任务列表 tasks[]
+   code anchor：按 tasks 逐任务生成（requiresSubtasks 全绿才推进）→ 全部生成后
+     fix→run 循环 0 错误 → 引擎 tsc+lint+build+复杂度15+check-naming+verify-completion
+```
 
 ## 架构演进
 
@@ -40,6 +57,18 @@ code anchor 的 verify 已经跑了 tsc+lint。verify anchor 又跑 tsc+lint+bui
 
 ---
 
+## 🔧 环境前置：ai-ultra（执行前提，未装先装）
+
+本 skill 靠 `nut gateloop` CLI 驱动（npm 包 `ai-ultra` 提供）。执行前必须确认：
+
+```
+1. 检测：npx nut --version 执行成功（exit 0）= 已安装
+2. 未安装 → 先装（devDependency）：npm install ai-ultra --save-dev
+   （pnpm: pnpm add -D ai-ultra；yarn: yarn add -D ai-ultra；裸目录先 npm init -y；禁 -g）
+3. 验证：npx nut gateloop --help 能列出子命令 = 可用
+4. ai-ultra 本仓库内：直接 node dist/cli/index.cjs gateloop ...（改过 src 先 npm run build），禁止再 npm 安装
+```
+
 ## GateLoop Harness 驱动模式
 
 ```
@@ -57,7 +86,8 @@ done
 ### 启动流程
 
 ```bash
-MANIFEST=.codebuddy/skills/frontend-codegen/anchor.config.json
+# manifest 路径 = 本 skill 目录下的 anchor.config.json（skill 可放任意位置，如 knote）
+MANIFEST=<skillDir>/anchor.config.json
 
 # 1. 初始化任务
 nut gateloop init $MANIFEST --task "实现用户列表页"
@@ -70,7 +100,7 @@ nut gateloop next $MANIFEST
 
 # 3. 引擎校验 inventory 产出 + emit → 推进到 design anchor：
 #    - brief: 设计目标（coverage 必须覆盖 inventory.violations）
-#    - rulesInline: frontend-design/RULE.mdc 已内联
+#    - rulesInline: rules/design-rules.mdc 已内联
 #    - artifactsInline: inventory（违规清单）已内联
 #    - produces: .specflow/context/current.json
 #    - emits: frontendPlan
@@ -82,7 +112,7 @@ nut gateloop next $MANIFEST
 #    通过 → 推进到 code anchor
 #
 # 5. code anchor 指令：
-#    - rulesInline: frontend-codegen/RULE.mdc + css-style-writer/RULE.mdc + code-quality-guard/RULE.mdc 已内联
+#    - rulesInline: frontend-codegen/RULE.mdc + rules/style-rules.mdc + rules/quality-rules.mdc 已内联
 #    - artifactsInline: frontendPlan 已内联
 #    - requiresSubtasks: true
 #
@@ -98,9 +128,9 @@ nut gateloop next $MANIFEST
 
 | Anchor | 职责 | 引擎验证 | 数据流 |
 |--------|------|---------|--------|
-| **inventory** | 脚本产出违规清单（客观，模型不参与判断） | produceScripts 重跑覆盖 + producesFresh + modelWritable:false | emits: `inventory`（autoEmit 自动产出） |
-| **design** | 技术设计 + 架构精判 + coverage 覆盖 violations | schema 校验 frontendPlan 4 张表 + coverage + architectureReview.verdicts + verify-coverage 集合闭包 + producesFresh | consumes: `inventory`, emits: `frontendPlan` + `architectureReview` |
-| **code** | 规则就绪 + 编码实现（处理 coverage.targets）+ 验证交付 | tsc + lint + build + style-crosscheck + check-naming + verify-completion 重跑清零 + producesFresh + **review 主观质量评审（9 项 model：6 代码质量 + 3 样式质量，逐条 verdict+evidence → code-review.json）** | consumes: `frontendPlan` + `architectureReview`, requiresSubtasks |
+| **inventory** | 环境与风格基线：脚本客观产出违规清单（模型不参与判断） | produceScripts 重跑覆盖 + producesFresh + modelWritable:false | emits: `inventory`（autoEmit 自动产出） |
+| **design** | Phase 0 环境风格探测 + 设计思考四步（影响范围→方案→改动→任务列表）+ 架构精判 + coverage | schema 校验 impactScope/changes/tasks + 4 张表 + coverage + architectureReview.verdicts + verify-coverage 集合闭包 + producesFresh | consumes: `inventory`, emits: `frontendPlan` + `architectureReview` |
+| **code** | 按任务生成（tasks 逐个，组件形式 a-b/index.*）+ 质量验收（fix→run 0 错误） | tsc + lint + build + fileSize(圈复杂度≤15) + style-crosscheck + check-naming + verify-completion 重跑清零 + producesFresh + **review 主观质量评审（11 项 model：2 约定 + 6 代码质量 + 3 样式质量，逐条 verdict+evidence → code-review.json）** | consumes: `frontendPlan` + `architectureReview`, requiresSubtasks |
 
 ### 模型在每阶段只做三件事
 
@@ -153,13 +183,13 @@ GateLoop code anchor verify 强制执行 tsc + lint + build（stylelint 按需�
 ```
 GateLoop code anchor verify 强制执行 tsc + lint + build + fileSize + prettier（stylelint 按需触发），exit 0 才推进。
 
-圈复杂度规则（地板，带逃生口）：
-  圈复杂度 ≤ 10 / 函数 ≤ 25 行 / 文件 ≤ 360 行 → PASS
-  圈复杂度 11-13 → 触发"拆分建议"，模型可选：
+圈复杂度规则（地板，基线 15 固定死，带逃生口）：
+  圈复杂度 ≤ 15 / 函数 ≤ 25 行 / 文件 ≤ 360 行 → PASS
+  圈复杂度 16-18 → 触发"拆分建议"，模型可选：
     A. 拆分（默认推荐）
     B. 加 // @complexity-justified: <具体理由> 注释声明例外
        （仅当本质复杂，如状态机 reducer / 配置驱动决策表 / 编译器类逻辑）
-  圈复杂度 > 13 / 函数 > 25 行 / 文件 > 360 行 → 必须拆分，无逃生口
+  圈复杂度 > 18 / 函数 > 25 行 / 文件 > 360 行 → 必须拆分，无逃生口
 
 🔴 禁止：留 ERROR 交付 / 把检测当可选。
 🔴 tsc 通过 ≠ lint 通过：
@@ -171,7 +201,7 @@ GateLoop code anchor verify 强制执行 tsc + lint + build + fileSize + prettie
 🔴 逃生口滥用（如所有函数都加）= 设计问题，需重新审视
 ```
 
-### 铁律 4：设计约束（来自 frontend-design · 客观地板 + 主观精判 + 完备性）
+### 铁律 4：设计约束（来自 rules/design-rules.mdc · 客观地板 + 主观精判 + 完备性）
 
 ```
 ⚠️ 具体约束来自 design anchor 产出的 frontendPlan + architectureReview（artifactsInline 内联）。
@@ -246,8 +276,8 @@ code anchor verify 分两层：
 ### Anchor 1: design — 技术设计
 
 **引擎指令包含：**
-- `rulesInline`: frontend-design/RULE.mdc（铁律 1-13 已内联）
-- `brief`: 产出 frontendPlan（函数归属表/状态分类表/效率审计清单/模块拆分边界）
+- `rulesInline`: rules/design-rules.mdc（铁律 1-13 已内联）
+- `brief`: 设计思考四步（影响范围→方案→改动→任务列表）+ 产出 frontendPlan（impactScope/changes/tasks + 函数归属表/状态分类表/效率审计清单/模块拆分边界）
 
 **执行（按 rulesInline 中的铁律）：**
 1. Phase 0 上下文注入：探测项目现状（路由/Store/helpers/Token）
@@ -275,26 +305,26 @@ nut gateloop next $MANIFEST
 ### Anchor 2: code — 编码实现 + 验证交付
 
 **引擎指令包含：**
-- `rulesInline`: frontend-codegen/RULE.mdc + css-style-writer/RULE.mdc + code-quality-guard/RULE.mdc（全部已内联）
+- `rulesInline`: frontend-codegen/RULE.mdc + rules/style-rules.mdc + rules/quality-rules.mdc（全部已内联）
 - `artifactsInline`: frontendPlan（上游 design 阶段产出，已内联）
 - `requiresSubtasks`: true（大任务必须先拆子任务）
 
 #### 步骤 1：规则就绪（code-quality-guard 任务1）
 
 ```bash
-# 检测规则知识库是否存在
-list_dir('.codebuddy/skills/code-quality-guard/references/references')
+# 检测规则知识库是否存在（相对 skill 目录）
+list_dir('<skillDir>/references/references')
 
 # 不存在 → 强制生成
 npx nut lint extract --verbose
-npx nut lint knowledge --source eslint --rules all --overwrite true --outputDir .codebuddy/skills/code-quality-guard/references
-npx nut lint knowledge --source stylelint --rules all --overwrite true --outputDir .codebuddy/skills/code-quality-guard/references
+npx nut lint knowledge --source eslint --rules all --overwrite true --outputDir <skillDir>/references
+npx nut lint knowledge --source stylelint --rules all --overwrite true --outputDir <skillDir>/references
 ```
 
 #### 步骤 2：拆子任务（requiresSubtasks 强制）
 
 ```bash
-# 按组件/模块拆子任务
+# 按 frontendPlan.tasks 拆子任务（设计阶段已生成任务列表）
 nut gateloop subtask-add $MANIFEST --desc "实现列表组件"
 nut gateloop subtask-add $MANIFEST --desc "实现详情组件"
 nut gateloop subtask-add $MANIFEST --desc "实现筛选栏"
@@ -309,23 +339,27 @@ nut gateloop subtask-done $MANIFEST --id design-sub-1
 
 ```
 按 artifactsInline 中的 frontendPlan 编码：
+  - 任务列表 tasks → 逐任务生成（requiresSubtasks 全绿才推进）
+  - 改动清单 changes → 每个文件按 fileType 生成（tsx|ts|js|jsx|scss|module.css|css）
   - 函数归属表 → 每个函数写到指定文件
   - 状态分类表 → 每个 state 用指定容器
   - 效率审计清单 → useEffect 依赖 / React.memo / useCallback
   - 模块拆分边界 → 每个文件只做规定的事
+  - 组件形式固定：<a-b>/index.tsx + <a-b>/index.scss（kebab-case 目录，固定死）
 ```
 
 **编码规范（由 rulesInline 中的铁律约束）：**
 
 ```
-行数：index.tsx ≤ 120行 | hook.ts ≤ 150行 | .module.scss ≤ 200行 | 其他 ≤ 360行
-      单函数 ≤ 25行 | 缩进 ≤ 2层 | 圈复杂度 ≤ 10
+组件形式（固定死）：<a-b>/index.tsx + <a-b>/index.scss（目录 kebab-case，入口 index）
+行数：index.tsx ≤ 120行 | hook.ts ≤ 150行 | index.scss ≤ 200行 | 其他 ≤ 360行
+      单函数 ≤ 25行 | 缩进 ≤ 2层 | 圈复杂度 ≤ 15
 
 TypeScript：禁止 any | T[]/Array<T> | === 严格比较 | err instanceof Error
             async 禁止直接传 onClick → () => { void fn(); }
 Import：第三方 → @/别名 → ./相对 → .scss 最后
 
-样式（按 css-style-writer 规范，rulesInline 已内联）：
+样式（按 rules/style-rules.mdc 铁律，rulesInline 已内联）：
   - 扁平结构（禁止嵌套选择器）
   - CSS 变量 var(--color-xxx)（禁止硬编码）
   - 全状态覆盖（hover/focus/disabled + loading/empty/error）
@@ -339,12 +373,12 @@ Import：第三方 → @/别名 → ./相对 → .scss 最后
 # 1. 批量自动修复（不要逐文件）
 npx nut lint fix "src/**/*.ts" --write
 npx nut lint fix "src/**/*.tsx" --write
-npx nut lint fix "src/**/*.module.scss" --write
+npx nut lint fix "src/**/*.scss" --write
 
 # 2. 批量验证
 npx nut lint run "src/**/*.ts"
 npx nut lint run "src/**/*.tsx"
-npx nut lint run "src/**/*.module.scss"
+npx nut lint run "src/**/*.scss"
 ```
 
 ```
@@ -436,7 +470,10 @@ PowerShell CLIXML 噪声规避：
 |------|------|---------|
 | `anchor.config.json` | GateLoop harness 配置（2 anchor + verify） | nut gateloop init/next 读取 |
 | `RULE.mdc` | 前端代码生成铁律（GateLoop reads 内联） | code anchor rulesInline |
+| `rules/design-rules.mdc` | 设计铁律 1-13（原 frontend-design/RULE.mdc，design anchor 内联） | design anchor rulesInline |
+| `rules/style-rules.mdc` | 样式铁律 1-11（原 css-style-writer/RULE.mdc，code anchor 内联） | code anchor rulesInline |
+| `rules/quality-rules.mdc` | 质检铁律（原 code-quality-guard/RULE.mdc，code anchor 内联） | code anchor rulesInline |
 | `rules/iron-rules.md` | 铁律详细规范 | 按需 read_file |
 | `rules/file-structure.md` | 文件结构规范 | 按需 read_file |
 | `rules/anti-patterns.md` | 反模式清单 | 按需 read_file |
-| `references/` | 详细规范参考文件 | 按需 read_file |
+| `references/` | 详细规范参考文件（含 architecture-metrics-checklist.md / style-rules.md / layout-rules.md） | 按需 read_file |

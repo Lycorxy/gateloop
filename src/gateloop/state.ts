@@ -361,7 +361,8 @@ export async function doNext(
         anchor: AnchorDefinition,
         cwd: string,
         state: AnchorState,
-        hooks?: VerifyHooks
+        hooks?: VerifyHooks,
+        manifestDir?: string
     ) => Promise<VerifyResult>,
     cwd: string = manifest.cwd || process.cwd(),
     memoryHooks?: MemoryHooks,
@@ -424,7 +425,7 @@ export async function doNext(
         }
     }
 
-    const verifyResult = await verifyFn(currentAnchor, cwd, state, verifyHooks)
+    const verifyResult = await verifyFn(currentAnchor, cwd, state, verifyHooks, manifest.manifestDir)
 
     // ★ 前置门禁 2：emits 校验（并入 verifyResult）
     checkEmits(currentAnchor, verifyResult, state)
@@ -1008,7 +1009,7 @@ function buildInstructionSync(
 ): AnchorInstruction {
     const baseCwd = manifest.cwd || process.cwd()
 
-    const rulesInline = inlineRules(anchor, baseCwd)
+    const rulesInline = inlineRules(anchor, baseCwd, manifest.manifestDir)
     const artifactsInline = inlineArtifacts(anchor, state, baseCwd)
 
     const stageRecord = state.stages[state.currentAnchorIndex]
@@ -1043,14 +1044,28 @@ function buildInstructionSync(
     }
 }
 
-/** 内联规则文件内容（reads → rulesInline） */
-function inlineRules(anchor: AnchorDefinition, baseCwd: string): RuleInline[] {
+/**
+ * ★ 解析 reads 路径（skill 可移植）：先按项目 cwd（兼容旧的绝对前缀写法），
+ * 不存在再 fallback 到 manifest 所在目录（相对 skill 目录写法，如 rules/design-rules.mdc）。
+ */
+function resolveReadPath(readPath: string, baseCwd: string, manifestDir?: string): string | null {
+    const byCwd = join(baseCwd, readPath)
+    if (existsSync(byCwd)) return byCwd
+    if (manifestDir) {
+        const bySkill = join(manifestDir, readPath)
+        if (existsSync(bySkill)) return bySkill
+    }
+    return null
+}
+
+/** 内联规则文件内容（reads → rulesInline；两级解析：cwd 优先，fallback manifestDir） */
+function inlineRules(anchor: AnchorDefinition, baseCwd: string, manifestDir?: string): RuleInline[] {
     const rulesInline: RuleInline[] = []
     if (!anchor.reads) return rulesInline
 
     for (const readPath of anchor.reads) {
-        const fullPath = join(baseCwd, readPath)
-        if (!existsSync(fullPath)) continue
+        const fullPath = resolveReadPath(readPath, baseCwd, manifestDir)
+        if (!fullPath) continue
         try {
             rulesInline.push({ source: readPath, content: readFileSync(fullPath, 'utf-8') })
         } catch {
