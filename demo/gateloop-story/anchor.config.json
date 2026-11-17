@@ -1,0 +1,25 @@
+{
+  "name": "broken-fix-demo",
+  "description": "真实事故复现：三类问题拆三个锚点，每个锚点用真实工具 exit 0 守门——验证不过 = 不推进",
+  "maxAttempts": 3,
+  "anchors": [
+    {
+      "id": "lint",
+      "name": "ESLint 过检",
+      "brief": "修复 broken-sample.ts 的全部 ESLint 违规，完成后调用 next（引擎重跑 npx eslint，exit 0 才推进）",
+      "verify": { "custom": "npx eslint broken-sample.ts" }
+    },
+    {
+      "id": "ts",
+      "name": "tsc 过检",
+      "brief": "修复全部 TS 类型错误，完成后调用 next（引擎重跑 npx tsc --noEmit --strict，exit 0 才推进）",
+      "verify": { "custom": "npx tsc --noEmit --strict broken-sample.ts" }
+    },
+    {
+      "id": "format",
+      "name": "Prettier 过检",
+      "brief": "修复全部格式违规，完成后调用 next（引擎重跑 npx prettier --check，exit 0 才推进）",
+      "verify": { "custom": "npx prettier --check broken-sample.ts" }
+    }
+  ]
+}

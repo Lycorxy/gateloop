@@ -1,0 +1,76 @@
+{
+  "skillName": "broken-fix-demo",
+  "task": "修复 broken-sample.ts 三类问题",
+  "taskId": "20261117024200-011d969a",
+  "currentAnchorIndex": 2,
+  "currentStage": "format",
+  "stages": [
+    {
+      "anchorId": "lint",
+      "status": "passed",
+      "attempts": 2,
+      "startedAt": "2026-11-17T02:42:00.356Z",
+      "attemptStartedAt": "2026-11-17T02:42:00.356Z",
+      "verifyResult": {
+        "passed": true,
+        "checks": [
+          {
+            "name": "Custom: npx eslint broken-sample.ts",
+            "passed": true,
+            "output": "",
+            "duration": 3158
+          }
+        ],
+        "errors": [],
+        "duration": 3160
+      },
+      "completedAt": "2026-11-17T02:42:39.683Z"
+    },
+    {
+      "anchorId": "ts",
+      "status": "passed",
+      "attempts": 2,
+      "startedAt": "2026-11-17T02:42:39.683Z",
+      "attemptStartedAt": "2026-11-17T02:42:39.683Z",
+      "verifyResult": {
+        "passed": true,
+        "checks": [
+          {
+            "name": "Custom: npx tsc --noEmit --strict broken-sample.ts",
+            "passed": true,
+            "output": "",
+            "duration": 5932
+          }
+        ],
+        "errors": [],
+        "duration": 5932
+      },
+      "completedAt": "2026-11-17T02:43:24.657Z"
+    },
+    {
+      "anchorId": "format",
+      "status": "passed",
+      "attempts": 1,
+      "startedAt": "2026-11-17T02:43:24.657Z",
+      "attemptStartedAt": "2026-11-17T02:43:24.657Z",
+      "verifyResult": {
+        "passed": true,
+        "checks": [
+          {
+            "name": "Custom: npx prettier --check broken-sample.ts",
+            "passed": true,
+            "output": "Checking formatting...\nAll matched files use Prettier code style!\n",
+            "duration": 1767
+          }
+        ],
+        "errors": [],
+        "duration": 1768
+      },
+      "completedAt": "2026-11-17T02:43:26.686Z"
+    }
+  ],
+  "artifacts": {},
+  "createdAt": "2026-11-17T02:42:00.356Z",
+  "updatedAt": "2026-11-17T02:43:26.686Z",
+  "done": true
+}
