@@ -353,21 +353,3 @@ export {
     type HttpResponseType,
     type HttpRetryOptions
 } from './http'
-
-// ==================== 代码格式化 ====================
-export {
-    detectFormatConfig,
-    formatFile,
-    formatFiles,
-    EXT_TO_PARSER,
-    ESLINT_EXTENSIONS,
-    PRETTIER_EXTENSIONS
-} from '../format'
-
-export type {
-    FormatterType,
-    FormatOptions,
-    FormatResult,
-    BatchFormatResult,
-    ProjectFormatConfig
-} from '../format'

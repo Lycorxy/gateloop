@@ -23,7 +23,7 @@
  * 只有本模块函数能写 store，与 state.ts 的"唯一写入者"原则对齐。
  */
 
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync, mkdirSync, renameSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import type { MemoryConfig } from './types'
 
@@ -66,6 +66,13 @@ function readStore(cwd: string, config?: MemoryConfig): MemoryStore {
         const parsed = JSON.parse(readFileSync(path, 'utf-8')) as MemoryStore
         return parsed.entries ? parsed : { entries: {} }
     } catch {
+        // 损坏容错：备份后告警（记忆为次要数据，不阻断流程）
+        try {
+            renameSync(path, `${path}.corrupt-${Date.now()}`)
+            console.warn('⚠️ 记忆 store 损坏，已备份，将从空 store 重建')
+        } catch {
+            console.warn('⚠️ 记忆 store 损坏且无法备份')
+        }
         return { entries: {} }
     }
 }

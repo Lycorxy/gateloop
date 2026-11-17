@@ -119,7 +119,7 @@
     {
       "id": "code",
       "name": "按任务生成 + 质量验收",
-      "brief": "前置：检测规则知识库就绪（references/references（skill 目录内）不存在则 nut lint knowledge 生成，--outputDir 相对 skill 目录的 references/）。然后按 frontendPlan.tasks 逐任务生成（requiresSubtasks 强制，全绿才推进）：文件形式固定 <a-b>/index.tsx + <a-b>/index.scss；按 changes[].fileType 决定生成 tsx/ts/js/jsx/scss/module.css/css。样式按 style-rules.mdc 铁律，代码按 RULE.mdc 铁律。全部生成后质量验收（quality-rules.mdc）：npx nut lint fix --write → run 循环到 0 错误。引擎强制重跑 tsc+lint+build + fileSize(圈复杂度≤15) + style-crosscheck + check-naming + verify-completion 闭环校验，exit 0 才推进。规则已由引擎内联，frontendPlan + architectureReview 已由引擎注入（artifactsInline）。",
+      "brief": "然后按 frontendPlan.tasks 逐任务生成（requiresSubtasks 强制，全绿才推进）：文件形式固定 <a-b>/index.tsx + <a-b>/index.scss；按 changes[].fileType 决定生成 tsx/ts/js/jsx/scss/module.css/css。样式按 style-rules.mdc 铁律，代码按 RULE.mdc 铁律。全部生成后质量验收（quality-rules.mdc）：自检代码规范（命名/圈复杂度≤15/行数上限，见 RULE.mdc 铁律）并修复到 0 违规。引擎强制重跑 tsc+build + metric style-crosscheck + metric code + verify-completion 闭环校验，exit 0 才推进。规则已由引擎内联，frontendPlan + architectureReview 已由引擎注入（artifactsInline）。",
       "reads": ["RULE.mdc", "rules/style-rules.mdc", "rules/quality-rules.mdc"],
       "consumes": ["frontendPlan", "architectureReview"],
       "requiresSubtasks": true,
@@ -127,15 +127,11 @@
       "produces": ["src/**/*.tsx", "src/**/*.ts", "src/**/*.scss"],
       "verify": {
         "tsc": true,
-        "lint": true,
         "build": true,
         "producesFresh": true,
-        "fileSize": { "maxFileLines": 360, "maxFunctionLines": 25, "maxComplexity": 15 },
-        "prettier": true,
         "custom": [
           "npx nut gateloop metric style-crosscheck --dir src/",
           "npx nut gateloop metric code --dir src/",
-          "npx nut lint check-naming \"src/**/*.{ts,tsx}\"",
           "node ${skillDir}/scripts/verify-completion.mjs --root src --plan .specflow/context/current.json"
         ],
         "review": {

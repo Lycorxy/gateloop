@@ -4,9 +4,9 @@
 >
 > GateLoop 源码：`src/gateloop/`。引擎入口类为 `GateLoop`（由历史代号 `Ads` 重命名而来）。任何 skill 通过声明 `AnchorManifest` 即可获得 GateLoop 能力——**门控推进 + 验证判定 + 数据/上下文内联 + 防信息衰减 + 事件通知**。
 >
-> **执行环境（二分）**：`nut gateloop` CLI 由 npm 包 `ai-ultra` 提供。
-> - **在 ai-ultra 本仓库内**：直接从本地构建执行——`node dist/cli/index.cjs gateloop init/next/status <manifest>`，或 npm scripts（`guard` / `guard:status` / `guard:retry` / `guard:reset`）；改过 `src/` 先 `npm run build`。**禁止在本仓库内再从 npm 安装 ai-ultra。**
-> - **在用户目标工作区**：未安装时**先装到本地** devDependency：`npm i -D ai-ultra`（pnpm：`pnpm add -D ai-ultra`；yarn：`yarn add -D ai-ultra`；裸目录先 `npm init -y`），验证 `npx nut gateloop --help`。禁止 `-g` 全局安装——版本随项目锁定，多项目互不污染。npm `latest` tag 即当前版本（0.0.0-beta.8），无需指定 beta tag。
+> **执行环境（二分）**：`nut gateloop` CLI 由 npm 包 `gateloop` 提供。
+> - **在 gateloop 本仓库内**：直接从本地构建执行——`node dist/cli/index.cjs gateloop init/next/status <manifest>`，或 npm scripts（`guard` / `guard:status` / `guard:retry` / `guard:reset`）；改过 `src/` 先 `npm run build`。**禁止在本仓库内再从 npm 安装 gateloop。**
+> - **在用户目标工作区**：未安装时**先装到本地** devDependency：`npm i -D gateloop`（pnpm：`pnpm add -D gateloop`；yarn：`yarn add -D gateloop`；裸目录先 `npm init -y`），验证 `npx nut gateloop --help`。禁止 `-g` 全局安装——版本随项目锁定，多项目互不污染。npm `latest` tag 即当前版本（0.0.0-beta.8），无需指定 beta tag。
 
 ---
 
@@ -242,14 +242,9 @@ export interface AnchorDefinition {
   ├ producesFresh   产物 mtime > 本轮开始（防复用旧文件）
   └ schema          JSON Schema 校验产物结构
 
-阶段3a 修复类（同步）
-  └ lintFix         ESLint 自动修复
-
-阶段3b 命令类校验（并行）
-  ├ lint / tsc / stylelint / build / test
-  ├ fileSize        行数/函数行数/圈复杂度
-  ├ prettier        格式
-  └ custom          自定义命令（exit 0 = 通过）
+阶段3  命令类校验
+  ├ tsc / build / test   内置命令类
+  └ custom          自定义命令（exit 0 = 通过；lint/stylelint/prettier 等任意真实命令经 custom 接入）
 
 阶段3c 结构化质量评审 review
   ├ ① 完整性    结论覆盖全部 checklist id
@@ -271,17 +266,13 @@ export interface AnchorDefinition {
 ```typescript
 export interface AnchorVerify {
     schema?: JSONSchema
-    lint?: boolean | { files?: string[] }
-    lintFix?: boolean | { files?: string[] }
     tsc?: boolean
-    stylelint?: boolean | { files?: string[] }
     build?: boolean | { command?: string }
     test?: boolean | { command?: string }
     custom?: string | string[]
+    commandTimeoutMs?: number       // 命令类验证超时（默认 120000）
     producesExist?: boolean
     producesFresh?: boolean
-    fileSize?: boolean | { maxFileLines?; maxFunctionLines?; maxComplexity? }
-    prettier?: boolean | { files?: string[] }
     review?: ReviewConfig          // checklist 由 skill 注入
     produceScripts?: string[]      // 产出型脚本（先于文件类）
     autoEmit?: Record<string, string>  // 脚本成功后自动 emit
@@ -584,7 +575,7 @@ Step 7  验证
       "brief": "按扫描结果产出 module.scss",
       "produces": ["src/**/*.module.scss"],
       "verify": {
-        "stylelint": true,
+        "custom": ["npx stylelint \"src/**/*.{css,scss}\""],
         "producesExist": true,
         "producesFresh": true
       }

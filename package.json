@@ -1,26 +1,21 @@
 {
-    "name": "ai-ultra",
-    "version": "0.0.0-beta.8",
-    "description": "🚀 ai-ultra - 为模型提供统一的命令行工具集（代码执行、格式化、Lint 知识库生成）",
+    "name": "gateloop",
+    "version": "0.0.0",
+    "description": "GateLoop 门控闭环引擎：AI Agent 的运行时——流程门控、多 skill 协作、exit code 验证（nut CLI + 编程 API）",
     "type": "module",
-    "main": "./dist/lint/index.cjs",
-    "module": "./dist/lint/index.mjs",
-    "types": "./dist/lint/index.d.ts",
+    "main": "./dist/gateloop/index.cjs",
+    "module": "./dist/gateloop/index.mjs",
+    "types": "./dist/gateloop/index.d.ts",
     "exports": {
         ".": {
-            "import": "./dist/lint/index.mjs",
-            "require": "./dist/lint/index.cjs",
-            "types": "./dist/lint/index.d.ts"
-        },
-        "./gateloop": {
             "import": "./dist/gateloop/index.mjs",
             "require": "./dist/gateloop/index.cjs",
             "types": "./dist/gateloop/index.d.ts"
         },
-        "./aivn": {
-            "import": "./dist/aivn/index.mjs",
-            "require": "./dist/aivn/index.cjs",
-            "types": "./dist/aivn/index.d.ts"
+        "./engine": {
+            "import": "./dist/gateloop/index.mjs",
+            "require": "./dist/gateloop/index.cjs",
+            "types": "./dist/gateloop/index.d.ts"
         },
         "./helpers": {
             "import": "./dist/helpers/index.mjs",
@@ -42,9 +37,7 @@
         "guard": "node dist/cli/index.cjs gateloop init anchor.config.json --task \"引擎代码质量守护\" && node dist/cli/index.cjs gateloop next anchor.config.json",
         "guard:status": "node dist/cli/index.cjs gateloop status anchor.config.json",
         "guard:retry": "node dist/cli/index.cjs gateloop retry anchor.config.json",
-        "guard:reset": "node dist/cli/index.cjs gateloop reset anchor.config.json",
-        "format": "node dist/cli/index.cjs format src",
-        "format:check": "node dist/cli/index.cjs format src --check"
+        "guard:reset": "node dist/cli/index.cjs gateloop reset anchor.config.json"
     },
     "dependencies": {
         "@rollup/pluginutils": "^5.1.0",
@@ -92,7 +85,9 @@
     },
     "keywords": [
         "cli",
-        "node-ultra",
+        "gateloop",
+        "ai-agent",
+        "harness",
         "code-execution",
         "format",
         "lint",

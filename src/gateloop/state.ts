@@ -11,7 +11,15 @@
  *   - retryStage    重置本阶段一轮尝试时间（断点续跑 fresh 校验用）
  */
 
-import { existsSync, readFileSync, writeFileSync, mkdirSync, appendFileSync, rmSync } from 'node:fs'
+import {
+    existsSync,
+    readFileSync,
+    writeFileSync,
+    mkdirSync,
+    appendFileSync,
+    rmSync,
+    renameSync
+} from 'node:fs'
 import { join, dirname } from 'node:path'
 import type {
     AnchorState,
@@ -58,13 +66,21 @@ export function getLogPath(cwd: string, logFile?: string): string {
     return join(cwd, logFile || join(DEFAULT_STATE_DIR, DEFAULT_LOG_FILE))
 }
 
-/** 读取状态（不存在返回 null） */
+/** 读取状态（不存在返回 null；文件损坏时备份并告警，绝不静默覆盖） */
 export function readState(cwd: string, stateFile?: string): AnchorState | null {
     const path = getStatePath(cwd, stateFile)
     if (!existsSync(path)) return null
     try {
         return JSON.parse(readFileSync(path, 'utf-8')) as AnchorState
     } catch {
+        // 损坏容错：备份原文件，避免 init 静默覆盖导致进度全丢
+        const backup = `${path}.corrupt-${Date.now()}`
+        try {
+            renameSync(path, backup)
+            console.error(`⚠️ 状态文件损坏，已备份到 ${backup}，任务将重新初始化`)
+        } catch {
+            console.error(`⚠️ 状态文件损坏且无法备份: ${path}`)
+        }
         return null
     }
 }
@@ -72,12 +88,15 @@ export function readState(cwd: string, stateFile?: string): AnchorState | null {
 /**
  * 写入状态（仅引擎内部可调用）
  * @internal 不导出给外部，确保唯一写入点
+ * 原子写：临时文件 + rename，防进程中断产生半写入损坏文件
  */
 function writeState(cwd: string, state: AnchorState, stateFile?: string): void {
     const path = getStatePath(cwd, stateFile)
     mkdirSync(dirname(path), { recursive: true })
     state.updatedAt = new Date().toISOString()
-    writeFileSync(path, JSON.stringify(state, null, 2), 'utf-8')
+    const tmp = `${path}.tmp-${process.pid}`
+    writeFileSync(tmp, JSON.stringify(state, null, 2), 'utf-8')
+    renameSync(tmp, path)
 }
 
 /** 追加日志条目 */
@@ -105,6 +124,12 @@ export function initTask(
     cwd: string = manifest.cwd || process.cwd(),
     anchorHooks?: AnchorHooks
 ): AnchorState {
+    // 配置校验：anchor id 必须唯一（onPass/onEscalate 按 id 定位，重复会命中错误目标）
+    const ids = new Set<string>()
+    for (const a of manifest.anchors) {
+        if (ids.has(a.id)) throw new Error(`anchor id 重复: "${a.id}"（manifest 配置错误）`)
+        ids.add(a.id)
+    }
     const now = new Date().toISOString()
     const taskId = generateTaskId()
 
@@ -380,14 +405,38 @@ export async function doNext(
 
     const currentAnchor = manifest.anchors[state.currentAnchorIndex]
     if (!currentAnchor) {
-        return allDone()
+        // 越界容错：manifest 被修改/状态索引异常时明确报错，不谎报完成
+        return {
+            stage: '',
+            advanced: false,
+            done: false,
+            escalate: true,
+            nextAction: `🛑 状态越界：currentAnchorIndex=${state.currentAnchorIndex} 超出 anchors 数量（${manifest.anchors.length}）。manifest 可能被修改，请检查或 reset。`
+        }
     }
 
     const stageRecord = state.stages[state.currentAnchorIndex]
 
-    // ★ 前置门禁 1：子任务闭环校验
+    // ★ 前置门禁 1：子任务闭环校验（计入 attempts，超限同样熔断，防无限空转）
     const subtaskError = checkSubtasks(currentAnchor, stageRecord)
     if (subtaskError) {
+        stageRecord.attempts++
+        writeState(cwd, state, manifest.stateFile)
+        const maxAttempts = resolveMaxAttempts(manifest, currentAnchor)
+        if (stageRecord.attempts >= maxAttempts) {
+            stageRecord.status = 'escalated'
+            stageRecord.escalated = true
+            writeState(cwd, state, manifest.stateFile)
+            return {
+                stage: currentAnchor.id,
+                advanced: false,
+                done: false,
+                escalate: true,
+                attempts: stageRecord.attempts,
+                maxAttempts,
+                nextAction: `🛑 连续 ${stageRecord.attempts} 次未完成子任务闭环，已熔断。请拆分子任务并逐个完成后再推进。`
+            }
+        }
         return buildInstruction(
             manifest,
             currentAnchor,
@@ -803,12 +852,45 @@ async function handleSuccess(
 
     // ★ 补丁B：正向跳转（onPass）——支持非线性编排（条件分支），默认下一个
     const nextIndex = resolveNextIndex(manifest, state, anchor)
+
+    // ★ 配置校验：onPass 指向不存在的 anchor → 报错停机，不谎报完成
+    if (anchor.onPass && nextIndex < 0) {
+        stageRecord.status = 'escalated'
+        stageRecord.escalated = true
+        writeState(cwd, state, manifest.stateFile)
+        return {
+            stage: anchor.id,
+            advanced: false,
+            done: false,
+            escalate: true,
+            attempts: stageRecord.attempts,
+            maxAttempts: resolveMaxAttempts(manifest, anchor),
+            nextAction: `🛑 配置错误：onPass 指向不存在的 anchor "${anchor.onPass}"，已停机。请修正 manifest。`
+        }
+    }
+
     const nextAnchor = nextIndex >= 0 ? manifest.anchors[nextIndex] : undefined
 
     if (nextAnchor && state.stages[nextIndex]) {
-        // 跳转（非 +1）时累加目标的 jumpCount 供环检测
-        if (anchor.onPass && nextIndex !== state.currentAnchorIndex + 1) {
-            state.stages[nextIndex].jumpCount = (state.stages[nextIndex].jumpCount ?? 0) + 1
+        // ★ 环检测（补丁B 增强）：onPass 跳转同样受 maxJumps 约束，指向自身视为配置错误
+        if (anchor.onPass) {
+            const maxJumps = manifest.maxJumps ?? 3
+            const targetJumps = (state.stages[nextIndex].jumpCount ?? 0) + 1
+            if (nextIndex === state.currentAnchorIndex || targetJumps > maxJumps) {
+                stageRecord.status = 'escalated'
+                stageRecord.escalated = true
+                writeState(cwd, state, manifest.stateFile)
+                return {
+                    stage: anchor.id,
+                    advanced: false,
+                    done: false,
+                    escalate: true,
+                    attempts: stageRecord.attempts,
+                    maxAttempts: resolveMaxAttempts(manifest, anchor),
+                    nextAction: `🛑 onPass 跳转非法（${nextIndex === state.currentAnchorIndex ? '指向自身' : `环检测超限 ${targetJumps}/${maxJumps}`}），已熔断。请修正 manifest。`
+                }
+            }
+            state.stages[nextIndex].jumpCount = targetJumps
         }
         state.currentAnchorIndex = nextIndex
         state.currentStage = nextAnchor.id
@@ -932,6 +1014,15 @@ export async function getCurrentInstruction(
     }
 
     const currentAnchor = manifest.anchors[state.currentAnchorIndex]
+    if (!currentAnchor) {
+        return {
+            stage: '',
+            advanced: false,
+            done: false,
+            escalate: true,
+            nextAction: `🛑 状态越界：currentAnchorIndex=${state.currentAnchorIndex} 超出 anchors 数量（${manifest.anchors.length}）。manifest 可能被修改，请检查或 reset。`
+        }
+    }
     return buildInstruction(
         manifest,
         currentAnchor,
@@ -1214,9 +1305,14 @@ async function runBeforeAnchor(
  */
 function emitEvent(anchorHooks: AnchorHooks | undefined, event: AnchorEvent): void {
     if (!anchorHooks?.onEvent) return
-    Promise.resolve(anchorHooks.onEvent(event)).catch(() => {
-        // 通知失败不阻断主流程
-    })
+    // 同步 throw 与异步 reject 双兜底：通知绝不阻断主流程
+    try {
+        Promise.resolve(anchorHooks.onEvent(event)).catch(() => {
+            // 通知失败不阻断主流程
+        })
+    } catch {
+        // 同步异常静默吞掉
+    }
 }
 
 /** 节点完成/流程完成/推进到下一节点的事件上报（拆出以降低 handleSuccess 复杂度） */
@@ -1294,15 +1390,10 @@ function buildVerifyHint(verify?: AnchorDefinition['verify']): string | undefine
 
     const checks: Array<[unknown, string]> = [
         [verify.schema, 'JSON Schema 校验'],
-        [verify.lintFix, 'ESLint Fix（nut lint fix --write）'],
-        [verify.lint, 'ESLint'],
         [verify.tsc, 'tsc --noEmit'],
-        [verify.stylelint, 'Stylelint'],
         [verify.build, '构建'],
         [verify.test, '单测'],
         [verify.custom, '自定义命令'],
-        [verify.fileSize, '文件规模（行数/函数/复杂度）'],
-        [verify.prettier, 'Prettier 格式'],
         [verify.review, '结构化质量评审（逐条 verdict+evidence）']
     ]
 

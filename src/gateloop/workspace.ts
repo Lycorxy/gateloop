@@ -14,7 +14,7 @@
  */
 
 import { existsSync, mkdirSync, rmSync, readdirSync, statSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, resolve, sep } from 'node:path'
 import { randomUUID } from 'node:crypto'
 
 const DEFAULT_SCRATCH_DIR = '.specflow/scratch'
@@ -65,6 +65,18 @@ export function initScratch(cwd: string, taskId: string, scratchDir?: string): s
  * 分配临时文件路径（在 workspace 下）
  * 不创建文件，只返回路径；可选写入初始内容
  */
+/**
+ * 在 workspace 内安全拼接路径（防路径穿越：name 含 ../ 或绝对路径时拒绝）
+ */
+function safeJoin(dir: string, name: string): string {
+    const resolved = resolve(join(dir, name))
+    const root = resolve(dir)
+    if (resolved !== root && !resolved.startsWith(root + sep)) {
+        throw new Error(`临时文件路径越界: "${name}"（禁止 ../ 与绝对路径）`)
+    }
+    return resolved
+}
+
 export function tmpFile(
     cwd: string,
     taskId: string,
@@ -74,7 +86,7 @@ export function tmpFile(
 ): string {
     const dir = getWorkspaceDir(cwd, taskId, scratchDir)
     mkdirSync(dir, { recursive: true })
-    const path = join(dir, name)
+    const path = safeJoin(dir, name)
     if (initialContent !== undefined) {
         writeFileSync(path, initialContent, 'utf-8')
     }
@@ -85,7 +97,10 @@ export function tmpFile(
  * 分配临时子目录（在 workspace 下）
  */
 export function tmpDir(cwd: string, taskId: string, name: string, scratchDir?: string): string {
-    const dir = join(getWorkspaceDir(cwd, taskId, scratchDir), name || randomUUID().slice(0, 8))
+    const dir = safeJoin(
+        getWorkspaceDir(cwd, taskId, scratchDir),
+        name || randomUUID().slice(0, 8)
+    )
     mkdirSync(dir, { recursive: true })
     return dir
 }

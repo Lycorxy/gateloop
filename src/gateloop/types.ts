@@ -214,37 +214,23 @@ export interface ReviewConfig {
 export interface AnchorVerify {
     /** JSON Schema 校验产物结构 */
     schema?: JSONSchema
-    /** 跑 ESLint（可指定 files） */
-    lint?: boolean | { files?: string[] }
-    /**
-     * 跑 ESLint 自动修复（npx nut lint fix --write），在 lint run 之前同步执行。
-     *
-     * 铁律 1 要求：编码 → fix → run → 0 错误。
-     * 将 fix 纳入引擎验证管道，模型无法跳过——
-     * 引擎在 verify 时自动执行 fix，再跑 lint run 检测剩余错误。
-     * 修复操作会修改文件，必须在命令类校验（lint run / tsc）之前完成。
-     */
-    lintFix?: boolean | { files?: string[] }
     /** 跑 tsc --noEmit */
     tsc?: boolean
-    /** 跑 Stylelint */
-    stylelint?: boolean | { files?: string[] }
     /** 跑构建（npm run build） */
     build?: boolean | { command?: string }
     /** 跑单测（vitest run / npm test） */
     test?: boolean | { command?: string }
     /** 自定义验证命令（exit 0 = 通过） */
     custom?: string | string[]
+    /**
+     * 命令类验证（custom / produceScripts / build / test / review script 防伪）的执行超时 ms。
+     * 默认 120000；长构建/长测试可声明更大值。
+     */
+    commandTimeoutMs?: number
     /** 产物文件存在性校验（默认 true，当 produces 非空时） */
     producesExist?: boolean
     /** 产物 mtime 校验：必须晚于本阶段"当前一轮"开始（防复用旧文件） */
     producesFresh?: boolean
-    /** 文件规模校验：行数/函数行数/圈复杂度（独立于 ESLint） */
-    fileSize?:
-        | boolean
-        | { maxFileLines?: number; maxFunctionLines?: number; maxComplexity?: number }
-    /** Prettier 格式化校验（独立于 ESLint 的 prettier 插件） */
-    prettier?: boolean | { files?: string[] }
 
     /**
      * 结构化质量评审（通用骨架，checklist 内容由 skill 注入）
@@ -708,15 +694,6 @@ export interface LogEntry {
     verifyResult?: VerifyResult
     /** 消息 */
     message: string
-}
-
-// ==================== 引擎选项 ====================
-
-export interface AdsOptions {
-    /** 工作目录 */
-    cwd?: string
-    /** 是否静默（不输出日志） */
-    silent?: boolean
 }
 
 // ==================== JSON Schema 简化类型 ====================

@@ -319,23 +319,12 @@ export class GateLoop {
     }
 }
 
-// ==================== 导出 ====================
+// ==================== 导出（公共 API：CLI 与库调用者只需以下内容） ====================
+// state/workspace 的内部函数（initTask/doNext/readState/tmpFile 等）不对外导出——
+// 全部能力经 GateLoop 类封装提供，杜绝"直接改状态"绕过引擎纪律。
 
 export { verify } from './verify'
-export {
-    initTask,
-    doNext,
-    getCurrentInstruction,
-    readState,
-    resetTask,
-    appendLog,
-    addSubtasks,
-    completeSubtask,
-    emitArtifact,
-    writeMemoryEntry,
-    retryStage
-} from './state'
-export { readMemory, writeMemory, checkMemoryWritten, type MemoryHooks } from './memory'
+export { readMemory, writeMemory, type MemoryHooks } from './memory'
 
 // 度量脚本（floor-ceiling 哲学落地）
 export { runMetric, printMetricHelp } from './metrics/runner'
@@ -344,17 +333,6 @@ export { metricArchitecture } from './metrics/architecture-metrics'
 export { metricCode } from './metrics/code-metrics'
 export { metricStyleCrosscheck } from './metrics/style-crosscheck'
 export type { MetricResult, MetricFact } from './metrics/types'
-export {
-    generateTaskId,
-    initScratch,
-    cleanupScratch,
-    gcScratch,
-    tmpFile,
-    tmpDir,
-    getWorkspaceDir,
-    getArtifactsDir,
-    getTaskScratch
-} from './workspace'
 export type {
     AnchorManifest,
     AnchorDefinition,
@@ -378,7 +356,6 @@ export type {
     VerifyCheck,
     VerifyHooks,
     LogEntry,
-    AdsOptions,
     JSONSchema,
     ReviewItem,
     ReviewConfig,

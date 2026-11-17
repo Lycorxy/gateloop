@@ -22,16 +22,15 @@ const isProd = process.env.NODE_ENV === 'production'
 const entries = {
     // CLI 入口（统一 nut 命令）
     cli: './src/cli/index.ts',
-    lint: './src/cli/lint.ts',
     'gateloop-cli': './src/cli/gateloop.ts',
-    // 库入口
+    // 库入口（API 形式）
     gateloop: './src/gateloop/index.ts',
     helpers: './src/helpers/index.ts'
 }
 
 // ==================== 需要添加 shebang 的文件 ====================
 
-const cliFiles = ['cli', 'lint', 'gateloop-cli']
+const cliFiles = ['cli', 'gateloop-cli']
 
 // ==================== JS/TS 打包配置 ====================
 

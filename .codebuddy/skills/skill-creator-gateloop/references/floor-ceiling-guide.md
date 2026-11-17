@@ -214,8 +214,8 @@ Q1: 否 → Q2: 否 → Q3: 否 → Q4: 否（写不出评审标准）→ 类型
 "verify": {
   // 类型 A — 收敛型 exit code（脚本现成）
   "tsc": true,
-  "lint": true,
-  "fileSize": { "maxFileLines": 360, "maxFunctionLines": 25, "maxComplexity": 10 },
+  "build": true,
+  "custom": ["npx eslint \"src/**/*.{ts,tsx}\""],
 
   // 类型 A — 收敛型 custom（自定义脚本）
   "custom": [

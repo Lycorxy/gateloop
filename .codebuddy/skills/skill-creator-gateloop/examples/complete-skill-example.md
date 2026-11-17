@@ -310,5 +310,5 @@ memory-hooks:
 - 规则注入靠 `reads: ["RULE.mdc"]` 由引擎内联，不再需要 `alwaysApply` + Step 0。
 - 4 个 anchor 由 `dependsOn` 拓扑驱动，verify 不过卡住跳不了。
 - `requiresSubtasks` 把 `reduce` 拆成任务队列，全绿才推进（见 `references/gateloop-engine-guide.md` §7）。
-- 启动命令：`npx nut gateloop init` → `npx nut gateloop next` → `npx nut gateloop status`（`nut ads` 已废弃，命令为 `nut gateloop`）。执行环境：ai-ultra 本仓库内直接 `node dist/cli/index.cjs gateloop ...`（改过 src 先 `npm run build`）；目标工作区须已装 `ai-ultra`（未装先 `npm i -D ai-ultra`，验证 `npx nut gateloop --help`，禁止 `-g` 全局安装）。
+- 启动命令：`npx nut gateloop init` → `npx nut gateloop next` → `npx nut gateloop status`（`nut ads` 已废弃，命令为 `nut gateloop`）。执行环境：gateloop 本仓库内直接 `node dist/cli/index.cjs gateloop ...`（改过 src 先 `npm run build`）；目标工作区须已装 `gateloop`（未装先 `npm i -D gateloop`，验证 `npx nut gateloop --help`，禁止 `-g` 全局安装）。
 ```

@@ -23,8 +23,7 @@ import type {
     ReviewConclusion,
     ReviewVerdict
 } from './types'
-import { checkFileSize } from '../lint/file-size'
-import { runPrettierCheck } from '../lint/prettier-check'
+
 
 // ==================== 主验证入口 ====================
 
@@ -59,7 +58,8 @@ export async function verify(
     // ── 阶段 0：产出型脚本（最先执行，产出 produces 声明的文件） ──
     // 解决"脚本产出型 anchor 与文件类校验顺序冲突"：原架构文件类校验先于
     // custom，首次进入时产物不存在即死锁。produceScripts 提前产出，再走文件类校验。
-    const produceChecks = runProduceScripts(verifyConfig?.produceScripts, cwd, manifestDir)
+    const cmdTimeout = verifyConfig?.commandTimeoutMs ?? 120000
+    const produceChecks = runProduceScripts(verifyConfig?.produceScripts, cwd, manifestDir, cmdTimeout)
     const producePassed = produceChecks.every((c) => c.passed)
 
     // autoEmit：produceScripts 全部成功后，引擎自动产出 artifact（免模型手动 emit）
@@ -76,7 +76,9 @@ export async function verify(
     const filePassed = producePassed && fileChecks.every((c) => c.passed)
 
     // ── 阶段 2+3：修复类 + 命令类校验 + 质量评审（文件类通过才跑，节省时间） ──
-    const postChecks = filePassed ? await runPostFileChecks(anchor, verifyConfig, cwd, manifestDir) : []
+    const postChecks = filePassed
+        ? await runPostFileChecks(verifyConfig, cwd, manifestDir, cmdTimeout)
+        : []
 
     // ── 汇总结果 ──
     const checks = [...produceChecks, ...fileChecks, ...postChecks]
@@ -131,14 +133,15 @@ function checkModelWritableConfig(verifyConfig: AnchorDefinition['verify']): Ver
 function runProduceScripts(
     scripts: string[] | undefined,
     cwd: string,
-    manifestDir?: string
+    manifestDir?: string,
+    timeout = 120000
 ): VerifyCheck[] {
     if (!scripts || scripts.length === 0) return []
 
     const checks: VerifyCheck[] = []
     for (const rawCmd of scripts) {
         const startTime = Date.now()
-        const result = execCommand(expandCommand(rawCmd, manifestDir), cwd)
+        const result = execCommand(expandCommand(rawCmd, manifestDir), cwd, timeout)
         checks.push({
             name: `Produce: ${rawCmd.slice(0, 50)}`,
             passed: result.passed,
@@ -192,17 +195,17 @@ function runFileChecks(
 // ==================== 命令类校验（并行执行） ====================
 
 /**
- * 运行命令类验证器：lint + tsc + stylelint + build + test + custom
+ * 运行命令类验证器：tsc + build + test + custom
  *
  * 这些验证器相互独立，并行执行大幅缩短总耗时。
- * 例：tsc(3s) + lint(2s) + stylelint(1s) + build(5s)
- *   串行 = 11s → 并行 ≈ 5s（受最慢项制约）
+ * 例：tsc(3s) + custom(2s) + build(5s)
+ *   串行 = 10s → 并行 ≈ 5s（受最慢项制约）
  */
 async function runCommandChecks(
-    anchor: AnchorDefinition,
     verifyConfig: AnchorDefinition['verify'],
     cwd: string,
-    manifestDir?: string
+    manifestDir?: string,
+    cmdTimeout = 120000
 ): Promise<VerifyCheck[]> {
     if (!verifyConfig) return []
 
@@ -213,28 +216,16 @@ async function runCommandChecks(
         | { passed: boolean; output: string }
         | Promise<{ passed: boolean; output: string }>
     const standardChecks: Array<{ cond: unknown; name: string; run: CheckFn }> = [
-        {
-            cond: verifyConfig.lint,
-            name: 'ESLint',
-            run: () => runLint(verifyConfig.lint!, cwd, anchor.produces)
-        },
         { cond: verifyConfig.tsc, name: 'tsc', run: () => runTsc(cwd) },
         {
-            cond: verifyConfig.stylelint,
-            name: 'Stylelint',
-            run: () => runStylelint(verifyConfig.stylelint!, cwd, anchor.produces)
-        },
-        { cond: verifyConfig.build, name: 'Build', run: () => runBuild(verifyConfig.build!, cwd) },
-        { cond: verifyConfig.test, name: 'Test', run: () => runTest(verifyConfig.test!, cwd) },
-        {
-            cond: verifyConfig.fileSize,
-            name: '文件规模',
-            run: () => runFileSizeCheck(anchor, verifyConfig.fileSize, cwd)
+            cond: verifyConfig.build,
+            name: 'Build',
+            run: () => runBuild(verifyConfig.build!, cwd, manifestDir, cmdTimeout)
         },
         {
-            cond: verifyConfig.prettier,
-            name: 'Prettier 格式',
-            run: () => runPrettierVerify(anchor, verifyConfig.prettier, cwd)
+            cond: verifyConfig.test,
+            name: 'Test',
+            run: () => runTest(verifyConfig.test!, cwd, manifestDir, cmdTimeout)
         }
     ]
 
@@ -250,7 +241,9 @@ async function runCommandChecks(
         for (const cmd of cmds) {
             const label = cmd.slice(0, 50)
             tasks.push(
-                runCheck(`Custom: ${label}`, () => runCustom(expandCommand(cmd, manifestDir), cwd))
+                runCheck(`Custom: ${label}`, () =>
+                    runCustom(expandCommand(cmd, manifestDir), cwd, cmdTimeout)
+                )
             )
         }
     }
@@ -405,6 +398,12 @@ function validateSchema(data: unknown, schema: JSONSchema, path: string): string
 
 /** 类型校验 */
 function checkType(data: unknown, expected: string, path: string): string | null {
+    if (expected === 'integer') {
+        if (typeof data !== 'number' || !Number.isInteger(data)) {
+            return `${path || 'root'}: 期望 integer, 实际 ${Array.isArray(data) ? 'array' : typeof data}`
+        }
+        return null
+    }
     const actual = Array.isArray(data) ? 'array' : typeof data
     if (actual !== expected) {
         return `${path || 'root'}: 期望 ${expected}, 实际 ${actual}`
@@ -419,6 +418,15 @@ function validateObject(data: unknown, schema: JSONSchema, path: string): string
     const obj = data as Record<string, unknown>
     const errors = checkRequiredFields(obj, schema, path)
     errors.push(...checkProperties(obj, schema, path))
+    // additionalProperties:false → 校验未声明字段（此前声明了但未实现）
+    if (schema.additionalProperties === false && schema.properties) {
+        const declared = new Set(Object.keys(schema.properties))
+        for (const key of Object.keys(obj)) {
+            if (!declared.has(key)) {
+                errors.push(`${path || 'root'}.${key}: 未声明的字段（additionalProperties:false）`)
+            }
+        }
+    }
     return errors
 }
 
@@ -457,36 +465,6 @@ function validateArray(data: unknown, schema: JSONSchema, path: string): string[
         errors.push(...validateSchema(item, schema.items!, `${path}[${i}]`))
     })
     return errors
-}
-
-// ==================== 修复类校验（同步，先于命令类校验） ====================
-
-/**
- * 运行修复类操作
- *
- * lintFix 等修复操作会修改文件，必须在命令类校验之前同步完成，
- * 避免与并行校验（lint run / tsc）的读写竞态条件。
- */
-function runFixChecks(
-    verifyConfig: AnchorDefinition['verify'] | undefined,
-    cwd: string,
-    produces?: string[]
-): VerifyCheck[] {
-    if (!verifyConfig) return []
-    const checks: VerifyCheck[] = []
-
-    if (verifyConfig.lintFix) {
-        const startTime = Date.now()
-        const result = runLintFix(verifyConfig.lintFix, cwd, produces)
-        checks.push({
-            name: 'ESLint Fix',
-            passed: result.passed,
-            output: result.output,
-            duration: Date.now() - startTime
-        })
-    }
-
-    return checks
 }
 
 // ==================== 命令执行验证器 ====================
@@ -547,155 +525,62 @@ function execCommand(
     }
 }
 
-/** ESLint 自动修复（npx nut lint fix --write），在 lint run 之前执行 */
-function runLintFix(
-    lintFix: boolean | { files?: string[] },
-    cwd: string,
-    produces?: string[]
-): { passed: boolean; output: string } {
-    const files = typeof lintFix === 'object' ? lintFix.files?.join(' ') || '' : ''
-    const target = files || produces?.join(' ') || ''
-    if (!target) {
-        return { passed: false, output: 'ESLint Fix: 未指定文件模式' }
-    }
-    const cmd = `npx nut lint fix ${target} --write`.trim()
-    return execCommand(cmd, cwd)
-}
-
-/** ESLint */
-function runLint(
-    lint: boolean | { files?: string[] },
-    cwd: string,
-    produces?: string[]
-): { passed: boolean; output: string } {
-    const files = typeof lint === 'object' ? lint.files?.join(' ') || '' : ''
-    const target = files || produces?.join(' ') || ''
-    if (!target) {
-        return { passed: false, output: 'ESLint: 未指定文件模式' }
-    }
-    const cmd = `npx nut lint run ${target}`.trim()
-    return execCommand(cmd, cwd)
-}
-
 /** tsc --noEmit */
 function runTsc(cwd: string): { passed: boolean; output: string } {
     return execCommand('npx tsc --noEmit', cwd)
 }
 
-/** Stylelint */
-function runStylelint(
-    stylelint: boolean | { files?: string[] },
-    cwd: string,
-    produces?: string[]
-): { passed: boolean; output: string } {
-    const files = typeof stylelint === 'object' ? stylelint.files?.join(' ') || '' : ''
-    const target =
-        files ||
-        produces?.filter((p) => p.endsWith('.scss') || p.endsWith('.css')).join(' ') ||
-        '**/*.{css,scss}'
-    const cmd = `npx stylelint "${target}"`.trim()
-    return execCommand(cmd, cwd)
-}
-
 /** 构建 */
 function runBuild(
     build: boolean | { command?: string },
-    cwd: string
+    cwd: string,
+    manifestDir?: string,
+    timeout = 120000
 ): { passed: boolean; output: string } {
     const cmd = typeof build === 'object' ? build.command || 'npm run build' : 'npm run build'
-    return execCommand(cmd, cwd)
+    return execCommand(expandCommand(cmd, manifestDir), cwd, timeout)
 }
 
 /** 单测 */
 function runTest(
     test: boolean | { command?: string },
-    cwd: string
+    cwd: string,
+    manifestDir?: string,
+    timeout = 120000
 ): { passed: boolean; output: string } {
     const cmd = typeof test === 'object' ? test.command || 'npx vitest run' : 'npx vitest run'
-    return execCommand(cmd, cwd)
+    return execCommand(expandCommand(cmd, manifestDir), cwd, timeout)
 }
 
 /** 自定义命令 */
-function runCustom(command: string, cwd: string): { passed: boolean; output: string } {
-    return execCommand(command, cwd)
-}
-
-/** 文件规模校验（独立于 ESLint，直接统计行数/函数行数/圈复杂度） */
-function runFileSizeCheck(
-    anchor: AnchorDefinition,
-    config: NonNullable<AnchorDefinition['verify']>['fileSize'],
-    cwd: string
+function runCustom(
+    command: string,
+    cwd: string,
+    timeout = 120000
 ): { passed: boolean; output: string } {
-    const patterns = anchor.produces || ['src/**/*.ts', 'src/**/*.tsx']
-    const cfg = typeof config === 'object' ? config : undefined
-    const result = checkFileSize(patterns, cwd, cfg)
-
-    if (result.passed) {
-        return {
-            passed: true,
-            output: `${result.checkedFiles} 个文件全部符合规模限制`
-        }
-    }
-
-    const lines = result.violations.map((v) => v.message)
-    return {
-        passed: false,
-        output: `${result.violations.length} 个违规:\n${lines.join('\n')}`
-    }
-}
-
-/** Prettier 格式化校验（独立于 ESLint 的 prettier 插件） */
-async function runPrettierVerify(
-    anchor: AnchorDefinition,
-    config: NonNullable<AnchorDefinition['verify']>['prettier'],
-    cwd: string
-): Promise<{ passed: boolean; output: string }> {
-    const files =
-        typeof config === 'object' && config.files
-            ? config.files
-            : anchor.produces || ['src/**/*.ts', 'src/**/*.tsx']
-    const result = await runPrettierCheck(files, cwd)
-
-    if (result.passed) {
-        return {
-            passed: true,
-            output: result.output || '格式检查通过'
-        }
-    }
-
-    const fileList =
-        result.unformattedFiles.length > 0 ? result.unformattedFiles.join('\n') : result.output
-    return {
-        passed: false,
-        output: `格式不合规文件:\n${fileList}`
-    }
+    return execCommand(command, cwd, timeout)
 }
 
 // ==================== 命令类 + 评审编排 ====================
 
 /**
- * 运行阶段 2+3：修复类 + 命令类校验 + 结构化质量评审
+ * 运行阶段 2+3：命令类校验 + 结构化质量评审
  *
  * 文件类校验通过后才执行（节省时间）。
- * 修复类操作（lintFix）同步执行，必须在命令类校验之前完成——
- * 修复会修改文件，与并行校验（lint run / tsc）同时跑会产生竞态条件。
- * 命令类校验并行；质量评审串行（依赖评审结论产物文件）。
+ * 命令类校验（tsc/build/test/custom）；质量评审串行（依赖评审结论产物文件）。
  */
 async function runPostFileChecks(
-    anchor: AnchorDefinition,
     verifyConfig: AnchorDefinition['verify'] | undefined,
     cwd: string,
-    manifestDir?: string
+    manifestDir?: string,
+    cmdTimeout = 120000
 ): Promise<VerifyCheck[]> {
-    // 阶段 2a：修复类操作（同步，先于命令类校验）
-    const fixChecks = runFixChecks(verifyConfig, cwd, anchor.produces)
-
-    // 阶段 2b：命令类校验（并行）
-    const cmdChecks = await runCommandChecks(anchor, verifyConfig, cwd, manifestDir)
+    // 阶段 2：命令类校验
+    const cmdChecks = await runCommandChecks(verifyConfig, cwd, manifestDir, cmdTimeout)
 
     // 阶段 3：质量评审
-    const reviewCheck = runReviewCheck(verifyConfig?.review, cwd, manifestDir)
-    return [...fixChecks, ...cmdChecks, ...(reviewCheck ? [reviewCheck] : [])]
+    const reviewCheck = runReviewCheck(verifyConfig?.review, cwd, manifestDir, cmdTimeout)
+    return [...cmdChecks, ...(reviewCheck ? [reviewCheck] : [])]
 }
 
 // ==================== 结构化质量评审 ====================
@@ -718,7 +603,8 @@ async function runPostFileChecks(
 function runReviewCheck(
     review: ReviewConfig | undefined,
     cwd: string,
-    manifestDir?: string
+    manifestDir?: string,
+    cmdTimeout = 120000
 ): VerifyCheck | null {
     const startTime = Date.now()
     if (!review) return null
@@ -752,7 +638,8 @@ function runReviewCheck(
             verdictMap.get(item.id),
             requireEvidence,
             cwd,
-            manifestDir
+            manifestDir,
+            cmdTimeout
         )
         errors.push(...result.errors)
         if (result.blockingFail) blockingFails.push(item.id)
@@ -816,7 +703,8 @@ function validateReviewItem(
     v: ReviewVerdict | undefined,
     requireEvidence: boolean,
     cwd: string,
-    manifestDir?: string
+    manifestDir?: string,
+    cmdTimeout = 120000
 ): { errors: string[]; blockingFail: boolean } {
     const errors: string[] = []
     if (!v) return { errors, blockingFail: false } // 已在完整性门禁报错
@@ -829,7 +717,7 @@ function validateReviewItem(
 
     // ② script 项防伪：引擎重跑 command 核对
     if (item.mode === 'script') {
-        errors.push(...checkScriptItem(item, v, cwd, manifestDir))
+        errors.push(...checkScriptItem(item, v, cwd, manifestDir, cmdTimeout))
     }
 
     // ③ model 项要证据
@@ -847,10 +735,13 @@ function checkScriptItem(
     item: ReviewConfig['checklist'][number],
     v: ReviewVerdict,
     cwd: string,
-    manifestDir?: string
+    manifestDir?: string,
+    timeout = 120000
 ): string[] {
-    if (!item.command) return []
-    const real = execCommand(expandCommand(item.command, manifestDir), cwd)
+    if (!item.command) {
+        return [`评审项 ${item.id}: mode=script 但缺 command（防伪无法执行，请补配置）`]
+    }
+    const real = execCommand(expandCommand(item.command, manifestDir), cwd, timeout)
     const realVerdict = real.passed ? 'pass' : 'fail'
     if (v.verdict !== realVerdict) {
         return [
@@ -882,9 +773,10 @@ function checkModelEvidence(item: ReviewConfig['checklist'][number], v: ReviewVe
  * 用于把模型从"看起来没问题"这种空话，逼到"填一张跑不了的表"。
  */
 function hasEvidenceReference(evidence: string): boolean {
-    // 行号引用：L12 / :12 / L12-40 / 行12 / 第12行
-    if (/L\d+|:\s*\d+|行\s*\d+|第\s*\d+|\d+-\d+/.test(evidence)) return true
-    // 文件路径/符号引用：含扩展名（.tsx .ts .js .go .py 等）
-    if (/\.\w{1,5}\b/.test(evidence)) return true
+    // ① 文件引用 + 行号组合（如 a.ts:12 / components/a.tsx:12-40 / a.ts L12 / a.ts 行12）——最强证据形态
+    if (/[\w./\\-]+\.\w{1,5}\s*(?::|L|行|第)\s*\d+/.test(evidence)) return true
+    // ② 行号引用与文件引用同时出现（L12 且含扩展名 token）
+    if (/L\d+|行\s*\d+|第\s*\d+/.test(evidence) && /[\w./\\-]+\.\w{1,5}\b/.test(evidence)) return true
+    // 其余一律拒绝：纯版本号（1.2.3）、纯行号（L12）、裸文件名（a.ts）都不能作为有效证据
     return false
 }
